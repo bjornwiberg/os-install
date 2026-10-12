@@ -10,6 +10,7 @@ return {
       -- Per-server LSP configs
       require('plugins.lsp.ts')
       require('plugins.lsp.biome')
+      require('plugins.lsp.oxc')
       require('plugins.lsp.pyright')
       require('plugins.lsp.jsonls')
       require('plugins.lsp.lua')

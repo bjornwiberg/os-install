@@ -9,23 +9,28 @@ return {
       vim.g['prettier#autoformat_require_pragma'] = 0
       vim.g['prettier#exec_cmd_async'] = 1
 
-      -- Format on save: Biome > Prettier > LSP > built-in indent (gg=G)
+      -- Format on save: Biome / oxfmt > Prettier > LSP > built-in indent (gg=G)
       vim.api.nvim_create_autocmd("BufWritePre", {
         pattern = "*",
         callback = function()
           -- Skip special buffers
           if vim.bo.buftype ~= "" then return end
 
-          -- Check if Biome LSP is available - if so, skip (Biome's fixAll handles it)
+          -- Skip when Biome or oxfmt is attached — their own on-save pipelines
+          -- (plugins/lsp/biome.lua, plugins/lsp/oxc.lua) format the buffer
           local clients = vim.lsp.get_clients({ bufnr = 0 })
           for _, client in ipairs(clients) do
-            if client.name == 'biome' then return end
+            if client.name == 'biome' or client.name == 'oxfmt' then return end
           end
 
           -- Check if biome.json exists - skip to avoid conflicts
           local file_dir = vim.fn.expand('%:p:h')
           local biome_config = vim.fs.find({ 'biome.json', 'biome.jsonc' }, { upward = true, path = file_dir })[1]
           if biome_config then return end
+
+          -- Same for oxfmt configs, in case the save beats the LSP attach
+          local oxfmt_config = vim.fs.find({ '.oxfmtrc.json', '.oxfmtrc.jsonc', 'oxfmt.config.ts' }, { upward = true, path = file_dir })[1]
+          if oxfmt_config then return end
 
           -- Try Prettier for supported file types when prettier binary is available
           local prettier_ft = {javascript=true, javascriptreact=true, typescript=true, typescriptreact=true, css=true, scss=true, html=true, json=true, markdown=true}
