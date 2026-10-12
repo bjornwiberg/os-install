@@ -73,11 +73,24 @@ local function project_bin_cmd(bin)
   end
 end
 
+-- lspconfig's root_dir calls on_dir(nil) when no oxc marker is found, and
+-- Neovim then starts the server anyway, rootless — in every JS/TS project,
+-- with no binary to run. Only pass a real root on.
+local function require_root(name)
+  local base = vim.lsp.config[name].root_dir
+  return function(bufnr, on_dir)
+    base(bufnr, function(root)
+      if root then on_dir(root) end
+    end)
+  end
+end
+
 -- lspconfig's oxlint on_attach adds :LspOxlintFixAll — keep it.
 local base_on_attach = vim.lsp.config.oxlint and vim.lsp.config.oxlint.on_attach
 
 vim.lsp.config('oxlint', {
   cmd = project_bin_cmd('oxlint'),
+  root_dir = require_root('oxlint'),
   on_attach = function(client, bufnr)
     if base_on_attach then base_on_attach(client, bufnr) end
     register_on_save(bufnr)
@@ -86,6 +99,7 @@ vim.lsp.config('oxlint', {
 
 vim.lsp.config('oxfmt', {
   cmd = project_bin_cmd('oxfmt'),
+  root_dir = require_root('oxfmt'),
   on_attach = function(_client, bufnr)
     register_on_save(bufnr)
   end,
