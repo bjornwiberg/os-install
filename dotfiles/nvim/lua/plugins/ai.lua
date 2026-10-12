@@ -1099,6 +1099,19 @@ local function switch_to_slot(i)
     toggle_session(name)
 end
 
+-- Read by lua/worktrees.lua (<leader>aw) to show which slot's agent works in
+-- which worktree and to jump to it.
+_G.__sidekick_slots = {
+    list = slot_list,
+    mux = function(name)
+        local ok, Session = pcall(require, "sidekick.cli.session")
+        return ok and Session.sid({ tool = name }) or nil
+    end,
+    transcript = _jsonl_for_mux,
+    info = get_claude_session_info,
+    switch = switch_to_slot,
+}
+
 for i = 1, 9 do
     keys[#keys + 1] = {
         "<leader>a" .. i,

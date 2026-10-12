@@ -151,6 +151,7 @@ vim.keymap.set('n', '<C-p>', function()
     },
   })
 end, { desc = 'Find files (smart)' })
+vim.keymap.set('n', '<leader>aw', function() require('worktrees').pick() end, { desc = 'Worktrees (agents, diffs, specs)' })
 vim.keymap.set('n', '<leader>rg', function() Snacks.picker.grep() end, { desc = 'Live grep' })
 
 -- Git
