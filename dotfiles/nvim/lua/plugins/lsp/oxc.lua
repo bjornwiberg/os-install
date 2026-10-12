@@ -15,25 +15,7 @@
 
 local augroup = vim.api.nvim_create_augroup("OxcOnSave", { clear = true })
 
-local function apply_code_action(bufnr, client_name, action_kind)
-  local client = vim.lsp.get_clients({ bufnr = bufnr, name = client_name })[1]
-  if not client then return end
-  local result = client:request_sync('textDocument/codeAction', {
-    textDocument = { uri = vim.uri_from_bufnr(bufnr) },
-    range = {
-      start = { line = 0, character = 0 },
-      ['end'] = { line = vim.api.nvim_buf_line_count(bufnr), character = 0 },
-    },
-    context = { only = { action_kind }, diagnostics = {} },
-  }, 3000, bufnr)
-
-  if not (result and result.result) then return end
-  for _, action in ipairs(result.result) do
-    if action.edit then
-      vim.lsp.util.apply_workspace_edit(action.edit, client.offset_encoding)
-    end
-  end
-end
+local code_action = require('plugins.lsp.code_action')
 
 -- One BufWritePre per buffer, registered by whichever oxc client attaches
 -- first; each step checks for its own client so lint-only or format-only
@@ -44,7 +26,7 @@ local function register_on_save(bufnr)
     group = augroup,
     buffer = bufnr,
     callback = function()
-      apply_code_action(bufnr, 'oxlint', 'source.fixAll.oxc')
+      code_action.apply(bufnr, 'oxlint', 'source.fixAll.oxc')
       if #vim.lsp.get_clients({ bufnr = bufnr, name = 'oxfmt' }) > 0 then
         vim.lsp.buf.format({ bufnr = bufnr, name = 'oxfmt', async = false })
       end

@@ -16,34 +16,14 @@
 -- the old autocmds before recreating them.
 local augroup = vim.api.nvim_create_augroup("BiomeOnSave", { clear = true })
 
-local function apply_biome_action(bufnr, action_kind)
-  local result = vim.lsp.buf_request_sync(bufnr, 'textDocument/codeAction', {
-    textDocument = { uri = vim.uri_from_bufnr(bufnr) },
-    range = {
-      start = { line = 0, character = 0 },
-      ['end'] = { line = vim.api.nvim_buf_line_count(bufnr), character = 0 },
-    },
-    context = { only = { action_kind }, diagnostics = {} },
-  }, 3000)
-
-  if not result then return end
-  for _, res in pairs(result) do
-    if res.result then
-      for _, action in ipairs(res.result) do
-        if action.edit then
-          vim.lsp.util.apply_workspace_edit(action.edit, 'utf-8')
-        end
-      end
-    end
-  end
-end
+local code_action = require('plugins.lsp.code_action')
 
 vim.lsp.config('biome', {
   -- Force UTF-8 position encoding. Biome only supports UTF-8, while ts_ls
   -- and Copilot default to UTF-16 — the mismatch triggers Neovim's
   -- "Multiple different client offset_encodings detected" warning.
   -- Declaring it explicitly here silences the warning for biome's side
-  -- and keeps workspace edits consistent with the utf-8 we pass above.
+  -- and keeps workspace edits in the client's utf-8 encoding.
   capabilities = {
     general = { positionEncodings = { "utf-8" } },
   },
@@ -61,8 +41,8 @@ vim.lsp.config('biome', {
         local clients = vim.lsp.get_clients({ bufnr = bufnr, name = 'biome' })
         if #clients == 0 then return end
 
-        apply_biome_action(bufnr, 'source.organizeImports.biome')
-        apply_biome_action(bufnr, 'source.fixAll.biome')
+        code_action.apply(bufnr, 'biome', 'source.organizeImports.biome')
+        code_action.apply(bufnr, 'biome', 'source.fixAll.biome')
 
         vim.lsp.buf.format({ name = 'biome', async = false })
       end,
