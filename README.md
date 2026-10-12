@@ -35,19 +35,19 @@ git config --global core.editor nvim
 ## Glone repo
 
 ```
-cd && git clone --depth=1 git@github.com:bjornwiberg/mac-install.git
+cd && git clone --depth=1 git@github.com:bjornwiberg/os-install.git
 ```
 
 ### Brew bundle
 
 ```
-cd ~/mac-install && brew bundle
+cd ~/os-install && brew bundle
 ```
 
 ### Osx settings
 
 ```
-cd ~/mac-install && chmod +x .osx && ./.osx
+cd ~/os-install && chmod +x .osx && ./.osx
 ```
 
 ### Symlink dotfiles
@@ -56,10 +56,10 @@ cd ~/mac-install && chmod +x .osx && ./.osx
 cd
 touch ~/.aliases
 rm ~/.zshrc
-ln -s mac-install/dotfiles/.zshrc
-ln -s mac-install/dotfiles/.shortcuts
-ln -s mac-install/dotfiles/.functions
-ln -s mac-install/dotfiles/.tmux.conf
+ln -s os-install/dotfiles/.zshrc
+ln -s os-install/dotfiles/.shortcuts
+ln -s os-install/dotfiles/.functions
+ln -s os-install/dotfiles/.tmux.conf
 ```
 
 ### Symlink settings for nvim
@@ -67,7 +67,7 @@ ln -s mac-install/dotfiles/.tmux.conf
 ```
 mkdir -p ~/.config
 cd ~/.config
-ln -s ~/mac-install/dotfiles/nvim
+ln -s ~/os-install/dotfiles/nvim
 ```
 
 ### Install pynvim for python3 support in nvim
@@ -82,7 +82,7 @@ python3 -m pip install --user --upgrade pynvim
 mkdir -p ~/Library/Application\ Support/Code/User
 cd ~/Library/Application\ Support/Code/User
 rm settings.json
-ln -s ~/mac-install/vscode/settings.json
+ln -s ~/os-install/vscode/settings.json
 ```
 
 ### Oh My Zsh
@@ -111,7 +111,7 @@ https://github.com/remi/teamocil
 
 ```
 gem install teamocil
-cd && ln -s mac-install/dotfiles/.teamocil
+cd && ln -s os-install/dotfiles/.teamocil
 ```
 
 ### Nerd Font Patched
@@ -180,7 +180,7 @@ ssh-keygen -t ed25519 -C "Key comment" && cat ~/.ssh/id_ed25519.pub   # add to G
 ### Clone repo
 
 ```
-cd && git clone --depth=1 git@github.com:bjornwiberg/mac-install.git
+cd && git clone --depth=1 git@github.com:bjornwiberg/os-install.git
 ```
 
 ### Oh My Zsh + zsh-autosuggestions
@@ -197,11 +197,11 @@ chsh -s "$(command -v zsh)"
 cd
 touch ~/.aliases
 rm -f ~/.zshrc
-ln -s mac-install/dotfiles/.zshrc
-ln -s mac-install/dotfiles/.shortcuts
-ln -s mac-install/dotfiles/.functions
-ln -s mac-install/dotfiles/.tmux.conf
-mkdir -p ~/.config && ln -s ~/mac-install/dotfiles/nvim ~/.config/nvim
+ln -s os-install/dotfiles/.zshrc
+ln -s os-install/dotfiles/.shortcuts
+ln -s os-install/dotfiles/.functions
+ln -s os-install/dotfiles/.tmux.conf
+mkdir -p ~/.config && ln -s ~/os-install/dotfiles/nvim ~/.config/nvim
 ```
 
 ### tmux plugins
