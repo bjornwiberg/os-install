@@ -27,3 +27,4 @@ alias push='git push'
 alias sites='cd && cd Sites'
 
 alias z='yarn'
+alias p='pnpm'
