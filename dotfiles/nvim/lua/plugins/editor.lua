@@ -106,11 +106,6 @@ return {
     end
   },
 
-  -- Markdown preview
-  {
-    "iamcco/markdown-preview.nvim",
-    build = function() vim.fn["mkdp#util#install"]() end,
-  },
   {
     "rmagatti/auto-session",
     lazy = false,

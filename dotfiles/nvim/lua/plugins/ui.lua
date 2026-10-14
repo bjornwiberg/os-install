@@ -11,7 +11,8 @@ return {
   {
     'iamcco/markdown-preview.nvim',
     ft = { 'markdown' },
-    build = function() vim.fn['mkdp#util#install']() end,
+    -- Shell build: the mkdp#util#install autoload isn't on the rtp yet on a fresh install.
+    build = 'cd app && npx --yes yarn install',
     init = function()
       vim.g.mkdp_filetypes = { 'markdown' }
     end,
@@ -445,7 +446,7 @@ return {
   },
 
   -- FZF with icons using fzf-lua (better icon support)
-  { 'junegunn/fzf', build = function() vim.fn['fzf#install']() end },  -- FZF binary
+  { 'junegunn/fzf', build = './install --bin' },  -- FZF binary
   {
     'ibhagwan/fzf-lua',  -- Lua wrapper with icon support
     config = function()
