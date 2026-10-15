@@ -28,6 +28,18 @@ return {
       require('tokyonight').setup({
         transparent = true,
         styles = { sidebars = 'transparent', floats = 'dark' },
+        -- The snacks explorer and the sidekick panel link to NormalFloat; make
+        -- those transparent too, so only real popups keep a background.
+        -- fg is required: a group with only bg = NONE counts as cleared, and the
+        -- plugins' default links would point it back at NormalFloat.
+        on_highlights = function(hl, c)
+          for _, group in ipairs({
+            'SnacksNormal', 'SnacksNormalNC', 'SnacksPicker', 'SnacksPickerList',
+            'SnacksPickerInput', 'SnacksPickerBox', 'SidekickChat',
+          }) do
+            hl[group] = { fg = c.fg, bg = 'NONE' }
+          end
+        end,
       })
       vim.cmd('colorscheme tokyonight-night')
     end,
