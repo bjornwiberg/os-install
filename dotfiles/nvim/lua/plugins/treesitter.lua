@@ -39,6 +39,12 @@ return {
     lazy = false,
     build = ':TSUpdate',
     config = function()
+      -- gcc's -O2 takes 7+ minutes on some grammars (e.g. gitcommit) vs ~4s at -O1.
+      -- `tree-sitter build` honors CFLAGS; macOS (clang) is fast, so Linux only.
+      if vim.fn.has('mac') == 0 and not vim.env.CFLAGS then
+        vim.env.CFLAGS = '-O1'
+      end
+
       if vim.fn.executable('tree-sitter') == 1 then
         require('nvim-treesitter').install(parsers)
       else
