@@ -23,6 +23,12 @@ return {
     'folke/tokyonight.nvim',
     priority = 1000,
     config = function()
+      -- Transparent background: the terminal's own background shows through.
+      -- Floats keep their dark background so popups stay readable.
+      require('tokyonight').setup({
+        transparent = true,
+        styles = { sidebars = 'transparent', floats = 'dark' },
+      })
       vim.cmd('colorscheme tokyonight-night')
     end,
   },
