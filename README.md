@@ -93,17 +93,7 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/robbyrussell/oh-my-zsh/mas
 
 ### Install tpm for TMUX
 
-```
-git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
-```
-
-#### Install tmux plugins
-
-```
-tmux
-```
-
-**Press prefix + I to fetch the plugins and source them.**
+Nothing to do: `.tmux.conf` clones tpm and installs missing plugins on every tmux start (needs `git`).
 
 ### Teamocil
 
@@ -206,11 +196,7 @@ mkdir -p ~/.config && ln -s ~/os-install/dotfiles/nvim ~/.config/nvim
 
 ### tmux plugins
 
-```
-git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
-```
-
-Start `tmux` and press **prefix + I** to install the plugins.
+Nothing to do: `.tmux.conf` clones tpm and installs missing plugins on every tmux start (needs `git`).
 
 ### First nvim start
 
