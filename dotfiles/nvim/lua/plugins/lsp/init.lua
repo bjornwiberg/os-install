@@ -40,9 +40,10 @@ return {
       -- Wrapped in a function + ColorScheme autocmd so they survive theme reloads.
       local c = require('tokyonight.colors').setup({ style = 'night' })
 
-      -- Float background and border (global, applies to all floats)
-      vim.api.nvim_set_hl(0, 'NormalFloat', { bg = c.bg_dark })
-      vim.api.nvim_set_hl(0, 'FloatBorder', { fg = c.blue2, bg = c.bg_dark })
+      -- Float border colour only: the background comes from tokyonight, which
+      -- is transparent (see plugins/ui.lua). Setting a bg here made every
+      -- dialog grey again once nvim-cmp loaded.
+      vim.api.nvim_set_hl(0, 'FloatBorder', { fg = c.blue2 })
 
       -- Kind icon colors — deferred so they run after nvim-cmp's own
       -- startup which re-links CmpItemKind* to the base group

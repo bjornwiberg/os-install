@@ -23,13 +23,12 @@ return {
     'folke/tokyonight.nvim',
     priority = 1000,
     config = function()
-      -- Transparent background: the terminal's own background shows through.
-      -- Floats keep their dark background so popups stay readable.
+      -- Transparent background everywhere, floats included: the terminal's own
+      -- background shows through. Float borders keep popups readable.
       require('tokyonight').setup({
         transparent = true,
-        styles = { sidebars = 'transparent', floats = 'dark' },
-        -- The snacks explorer and the sidekick panel link to NormalFloat; make
-        -- those transparent too, so only real popups keep a background.
+        styles = { sidebars = 'transparent', floats = 'transparent' },
+        -- Snacks and sidekick set their own groups; force them transparent too.
         -- fg is required: a group with only bg = NONE counts as cleared, and the
         -- plugins' default links would point it back at NormalFloat.
         on_highlights = function(hl, c)

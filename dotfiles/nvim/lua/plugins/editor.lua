@@ -80,7 +80,7 @@ return {
   -- Dim inactive windows (disabled; set enabled = true to bring it back)
   {
     'levouh/tint.nvim',
-    enabled = false,
+    enabled = true,
     config = function()
       require('tint').setup({
         tint = -60,
