@@ -278,11 +278,17 @@ return {
       -- Re-apply preview window keymaps after each buffer swap.
       -- Snacks only calls win:map() on the initial scratch buffer, so file
       -- preview buffers lose our <C-h>/<C-l>/<CR> bindings without this.
+      -- Skip listed buffers: when the previewed file is already open, Snacks
+      -- reuses the real buffer, and win:map() would leave buffer-local
+      -- <C-h> (focus_list) / <CR> on it after the picker closes, shadowing
+      -- vim-tmux-navigator.
       local preview = require("snacks.picker.core.preview")
       local orig_set_buf = preview.set_buf
       preview.set_buf = function(self, buf)
         orig_set_buf(self, buf)
-        self.win:map()
+        if not vim.bo[buf].buflisted then
+          self.win:map()
+        end
       end
     end,
     opts = {
