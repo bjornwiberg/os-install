@@ -1,0 +1,26 @@
+# Instance 2 of matilda_portal (see .claude/rules/parallel-dev-envs.md, "Ports per instance"):
+# database 6545, backend 3032 (metrics 9094), frontend 3002 (metrics 9095), Drizzle Studio 4985.
+# The database is always named matilda_portal; the backend waits for it to come up.
+windows:
+  - name: matilda_portal
+    root: ~/Sites/matilda_portal
+    layout: 538e,239x65,0,0[239x37,0,0,15,239x11,0,38{119x11,0,38,16,119x11,120,38,20},239x15,0,50{119x15,0,50,17,119x15,120,50[119x8,120,50,18,119x6,120,59,19]}]
+    panes:
+      - commands:
+          - tmux set-option -p -t :.0 @name nvim
+          - tmux set-option -p -t :.1 @name shell
+          - tmux set-option -p -t :.2 @name drizzle
+          - tmux set-option -p -t :.3 @name frontend
+          - tmux set-option -p -t :.4 @name backend
+          - tmux set-option -p -t :.5 @name database
+          - nvim
+        focus: true
+      - commands:
+      - commands:
+          - DATABASE_URL="postgres://postgres:postgres@localhost:6545/matilda_portal" pnpm db:studio --port 4985
+      - commands:
+          - PORT=3002 BACKEND_URL=http://localhost:3032 FRONTEND_METRICS_PORT=9095 pnpm dev:fe
+      - commands:
+          - BACKEND_PORT=3032 METRICS_PORT=9094 DATABASE_URL="postgres://postgres:postgres@localhost:6545/matilda_portal" pnpm dev:be
+      - commands:
+          - TAG=matilda_portal_db:alt PGPORT=6545 pnpm db:start
