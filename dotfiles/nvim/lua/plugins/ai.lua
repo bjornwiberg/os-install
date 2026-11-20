@@ -35,6 +35,8 @@ end
 local GRUNDEN_SCRIPTS_DIR = vim.fn.stdpath("config") .. "/scripts"
 local GRUNDEN_PROMPT_FILE = vim.fn.stdpath("config") .. "/prompts/grunden-system.md"
 local GRUNDEN_CHEAP_MODEL = "glm-5.3-flash"
+-- Order of Grunden models in the <leader>ao picker (unlisted ids go last).
+local GRUNDEN_PICKER_ORDER = { "glm-5.3", "deepseek-v4.1-flash-1017", "gemma-4-26b", "glm-5.3-flash" }
 local GRUNDEN_AGENTS = vim.json.encode({
     ["grunden-worker"] = {
         description = "Offloads batches of simple text jobs (summarise, classify, extract, translate, "
@@ -1108,6 +1110,9 @@ local keys = {
                     vim.notify("Ollama host unreachable: " .. host, vim.log.levels.WARN)
                 end
             end
+            -- Grunden models go above the Ollama ones.
+            local ollama_items = items
+            items = {}
             local genv = read_env_file(GRUNDEN_ENV_FILE)
             if genv and genv.GRUNDEN_API_KEY and genv.GRUNDEN_API_KEY ~= "" then
                 local base = (genv.GRUNDEN_API_URL or "https://api.grunden.ai"):gsub("/+$", "")
@@ -1117,18 +1122,27 @@ local keys = {
                 local lines = vim.fn.systemlist({ GRUNDEN_SCRIPTS_DIR .. "/grunden", "models", "--agentic" })
                 if vim.v.shell_error == 0 then
                     for _, line in ipairs(lines) do
-                        local id, alias, price = line:match("^([^\t]+)\t([^\t]*)\t([^\t]*)")
+                        local id, alias, price, ctx = line:match("^([^\t]+)\t([^\t]*)\t([^\t]*)\t([^\t]*)")
                         if id then
+                            -- "31k" -> 31000; "1M" (or unknown) -> nil = Claude Code's default.
+                            local k = ctx and ctx:match("^(%d+)k$")
                             table.insert(items, {
                                 model = id, alias = alias, price = price,
+                                context = k and tonumber(k) * 1000 or nil,
                                 grunden = { url = base, key = genv.GRUNDEN_API_KEY },
                             })
                         end
                     end
+                    local rank = {}
+                    for i, id in ipairs(GRUNDEN_PICKER_ORDER) do rank[id] = i end
+                    table.sort(items, function(a, b)
+                        return (rank[a.model] or 99) < (rank[b.model] or 99)
+                    end)
                 else
                     vim.notify("grunden models failed", vim.log.levels.WARN)
                 end
             end
+            vim.list_extend(items, ollama_items)
             if #items == 0 then
                 vim.notify("No Ollama models found. Try `ollama pull <model>`.", vim.log.levels.WARN)
                 return
@@ -1170,6 +1184,11 @@ local keys = {
                             CLAUDE_CODE_SUBAGENT_MODEL = GRUNDEN_CHEAP_MODEL,
                             CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1",
                             PATH = GRUNDEN_SCRIPTS_DIR .. ":" .. (vim.env.PATH or ""),
+                            -- Small-context models (gemma, 31k): tell Claude Code the real
+                            -- window so it auto-compacts in time, and cap the output
+                            -- reservation (default 32k would alone overflow the window).
+                            CLAUDE_CODE_MAX_CONTEXT_TOKENS = choice.context and tostring(choice.context) or nil,
+                            CLAUDE_CODE_MAX_OUTPUT_TOKENS = choice.context and "4096" or nil,
                         },
                         is_proc = false,
                     }

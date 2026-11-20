@@ -25,6 +25,11 @@ side work to subagents freely.
 | `deepseek` | `deepseek-v4.1-flash-1017` | 0.50→1.50 | 1M | Grunden's default model. Solid general reasoning |
 | `glm` | `glm-5.3` | 0.72→1.44 | 1M | The big GLM. Hard reasoning, careful code review, tricky one-shot analysis |
 
+If **you** are `gemma-4-26b`, your whole window is 31k tokens. Read files in
+small ranges, never dump large outputs into the conversation, and hand long
+inputs (big files, diffs, logs) to `grunden ask -M flash` or a subagent. Then
+work from their summary.
+
 Use them through `grunden ask -M <alias> [-e none|low|high|max] PROMPT`. Effort
 defaults to the model's lowest level (`none` for gemma, `low` for the rest). If a
 prompt overflows gemma's 31k context, the CLI retries automatically on flash.
