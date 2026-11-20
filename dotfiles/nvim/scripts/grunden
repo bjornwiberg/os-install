@@ -251,9 +251,19 @@ claude)
     for a in "${pass[@]}"; do
         case "$a" in -p|--print|-e|--expand) interactive=0 ;; esac
     done
+    # Running as root (e.g. inside a container): Claude Code refuses
+    # bypassPermissions for root outside a declared sandbox. IS_SANDBOX=1 is
+    # its own escape hatch for deliberate root containers (devcontainer,
+    # docker -u 0). We only set it when actually root, never locally.
+    root_extra=()
+    if [[ "$(id -u)" == 0 ]]; then
+        root_extra=(IS_SANDBOX=1)
+        echo "grunden: running as root — setting IS_SANDBOX=1 so Claude Code accepts bypass mode" >&2
+    fi
     if [[ $interactive -eq 1 && -t 0 ]]; then
         # Interactive: let Claude Code own the terminal completely.
         exec env -u ANTHROPIC_API_KEY \
+            "${root_extra[@]}" \
             ANTHROPIC_BASE_URL="$BASE" ANTHROPIC_AUTH_TOKEN="$GRUNDEN_API_KEY" \
             ANTHROPIC_MODEL="$id" ANTHROPIC_DEFAULT_OPUS_MODEL="$id" \
             ANTHROPIC_DEFAULT_SONNET_MODEL="$id" \
@@ -269,6 +279,7 @@ claude)
             --disallowedTools "${deny[@]}" "${pass[@]}"
     else
         env -u ANTHROPIC_API_KEY \
+            "${root_extra[@]}" \
             ANTHROPIC_BASE_URL="$BASE" ANTHROPIC_AUTH_TOKEN="$GRUNDEN_API_KEY" \
             ANTHROPIC_MODEL="$id" ANTHROPIC_DEFAULT_OPUS_MODEL="$id" \
             ANTHROPIC_DEFAULT_SONNET_MODEL="$id" \
