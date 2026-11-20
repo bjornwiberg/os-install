@@ -60,7 +60,8 @@ grunden <command> [options]
   usage [opts]                   Cost per API key / dimension / model (default: this month)
       -f, --from DATE            Start, inclusive (YYYY-MM-DD or ISO-8601)
       -t, --to DATE              End, exclusive
-      -b, --by GROUPS            api_key,end_user,model (default api_key,end_user)
+      -b, --by GROUPS            api_key,end_user,model (default end_user,model)
+      -a, --all                  Whole organisation, not just this API key
       -j, --json                 Raw JSON
 EOF
 }
@@ -162,24 +163,37 @@ usage)
     iso() { [[ "$1" == *T* ]] && printf '%s' "$1" || printf '%sT00:00:00%s' "$1" "$tz"; }
     from=$(date +%Y-%m-01)
     to=$(date -v1d -v+1m +%Y-%m-01 2>/dev/null || date -d "$(date +%Y-%m-01) +1 month" +%Y-%m-01)
-    by="api_key,end_user" raw=0
+    by="end_user,model" raw=0 all=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
         -f|--from) from=$2; shift 2 ;;
         -t|--to) to=$2; shift 2 ;;
         -b|--by) by=$2; shift 2 ;;
         -j|--json) raw=1; shift ;;
+        -a|--all) all=1; shift ;;
         *) die "usage: unknown option $1" ;;
         esac
     done
+    # The API reports the whole org; by default keep only rows for our own
+    # key, matched on api_key_prefix (the key's first 16 chars).
+    qby=$by
+    if [[ $all -eq 0 && ",$by," != *,api_key,* ]]; then qby="api_key,$by"; fi
     resp=$(api GET /v1/usage/allocation -G --data-urlencode "from=$(iso "$from")" \
-        --data-urlencode "to=$(iso "$to")" --data-urlencode "group_by=$by")
+        --data-urlencode "to=$(iso "$to")" --data-urlencode "group_by=$qby")
+    if [[ $all -eq 0 ]]; then
+        resp=$(printf '%s' "$resp" | jq --arg k "$GRUNDEN_API_KEY" \
+            '.data |= map(.api_key_prefix as $p | select($p != null and ($k | startswith($p))))')
+    fi
     if [[ $raw -eq 1 ]]; then printf '%s\n' "$resp"; exit 0; fi
-    echo "Usage $from → $to (to exclusive), grouped by $by"
+    scope="all keys"
+    [[ $all -eq 0 ]] && scope="key $(printf '%s' "$resp" | jq -r '.data[0].api_key_name // "(no usage yet)"')"
+    echo "Usage for $scope, $from → $to (to exclusive), grouped by $by"
     printf '%s' "$resp" | jq -r '
-        def eur: (. / 1e9 * 100 | round / 100 | tostring) as $s
+        # 2 decimals, or 4 below one cent so tiny delegated calls are visible.
+        def eur: (if . >= 1e7 then 2 else 4 end) as $d
+            | (. / 1e9 * pow(10; $d) | round / pow(10; $d) | tostring) as $s
             | ($s | split(".")) as $p
-            | "€" + $p[0] + "." + (($p[1] // "") + "00")[0:2];
+            | "€" + $p[0] + "." + (($p[1] // "") + "0000")[0:$d];
         (["KEY", "DIMENSION", "MODEL", "REQUESTS", "TOKENS", "EXCL. VAT", "INCL. VAT"] | @tsv),
         (.data | sort_by(-.cost_gross_nanoeur)[] | [
             (.api_key_name // "-"), (.end_user_ref // "Not dimensioned"), (.model_id // "-"),

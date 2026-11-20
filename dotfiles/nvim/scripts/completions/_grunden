@@ -20,7 +20,7 @@ _grunden() {
         'transcribe:Speech to text (kb-whisper-large, pianissimo-sv/-da), max 50 MB'
         'tts:Text to speech with chatterbox; requires -o OUT'
         'balance:Account balance'
-        'usage:Cost per API key / dimension / model (default this month)'
+        'usage:Cost for this API key per dimension/model (default this month; -a = whole org)'
         'help:Show usage'
     )
 
@@ -61,6 +61,7 @@ _grunden() {
             '(-f --from)'{-f,--from}'[start date, inclusive (default: 1st of this month)]:date (YYYY-MM-DD): ' \
             '(-t --to)'{-t,--to}'[end date, exclusive (default: 1st of next month)]:date (YYYY-MM-DD): ' \
             '(-b --by)'{-b,--by}'[group by]:groups:_values -s , group api_key end_user model' \
+            '(-a --all)'{-a,--all}'[whole organisation, not just this API key]' \
             '(-j --json)'{-j,--json}'[raw JSON]'
         ;;
     embed|pii)
