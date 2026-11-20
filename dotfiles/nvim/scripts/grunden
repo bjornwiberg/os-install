@@ -19,9 +19,10 @@ CHAT_MODEL="${GRUNDEN_CHAT_MODEL:-flash}"
 # unlisted ones were measured from usage deltas (marked ~). Context: gemma
 # rejects >31129 tokens; GLM accepted 600k. "agentic" = works as a Claude
 # Code model (tool calling via /v1/messages) — this is what <leader>ao offers.
-# Gemma only fits Claude Code with a capped context/output (set by ai.lua).
+# Gemma technically runs in Claude Code with a capped context/output, but
+# 31k is too small to be useful there, so it's delegation-only.
 # id|alias|in|out|context|reasoning levels|default effort|agentic|best for
-CATALOG='gemma-4-26b|gemma|~0.12|~0.36|31k|none/high|none|yes|Cheapest+fastest. Short one-shot text jobs: classify, extract, translate, short summaries. In Claude Code only small tasks (31k context).
+CATALOG='gemma-4-26b|gemma|~0.12|~0.36|31k|none/high|none|no|Cheapest+fastest. Short one-shot text jobs: classify, extract, translate, short summaries. Too small (31k) for Claude Code sessions.
 glm-5.3-flash|flash|~0.16|~0.48|1M|low/high/max|low|yes|Cheap all-rounder, long context. Default for delegated jobs and Claude Code subagents.
 deepseek-v4.1-flash-1017|deepseek|0.50|1.50|1M|low/high/max|low|yes|Grunden default (listed) chat model. Image input on /v1/chat/completions.
 glm-5.3|glm|~0.72|~1.44|1M|low/high/max|low|yes|Big GLM, most used across the organisation. Hard coding/agentic work, tricky reasoning. Most expensive.'

@@ -36,7 +36,7 @@ local GRUNDEN_SCRIPTS_DIR = vim.fn.stdpath("config") .. "/scripts"
 local GRUNDEN_PROMPT_FILE = vim.fn.stdpath("config") .. "/prompts/grunden-system.md"
 local GRUNDEN_CHEAP_MODEL = "glm-5.3-flash"
 -- Order of Grunden models in the <leader>ao picker (unlisted ids go last).
-local GRUNDEN_PICKER_ORDER = { "glm-5.3", "deepseek-v4.1-flash-1017", "gemma-4-26b", "glm-5.3-flash" }
+local GRUNDEN_PICKER_ORDER = { "glm-5.3", "deepseek-v4.1-flash-1017", "glm-5.3-flash" }
 local GRUNDEN_AGENTS = vim.json.encode({
     ["grunden-worker"] = {
         description = "Offloads batches of simple text jobs (summarise, classify, extract, translate, "
