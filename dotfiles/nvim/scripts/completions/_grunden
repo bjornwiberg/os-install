@@ -20,7 +20,7 @@ _grunden() {
         'transcribe:Speech to text (kb-whisper-large, pianissimo-sv/-da), max 50 MB'
         'tts:Text to speech with chatterbox; requires -o OUT'
         'balance:Account balance'
-        'usage:Cost allocation per user tag'
+        'usage:Cost per API key / dimension / model (default this month)'
         'help:Show usage'
     )
 
@@ -55,6 +55,13 @@ _grunden() {
         ;;
     rerank)
         _arguments '1:query: ' '*:document (or pipe one per line via stdin): '
+        ;;
+    usage)
+        _arguments \
+            '(-f --from)'{-f,--from}'[start date, inclusive (default: 1st of this month)]:date (YYYY-MM-DD): ' \
+            '(-t --to)'{-t,--to}'[end date, exclusive (default: 1st of next month)]:date (YYYY-MM-DD): ' \
+            '(-b --by)'{-b,--by}'[group by]:groups:_values -s , group api_key end_user model' \
+            '(-j --json)'{-j,--json}'[raw JSON]'
         ;;
     embed|pii)
         _arguments '*:text (or - / pipe via stdin): '

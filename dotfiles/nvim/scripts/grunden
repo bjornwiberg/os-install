@@ -57,7 +57,11 @@ grunden <command> [options]
   tts [TEXT|-] -o OUT [-v VOICE] [-f wav|mp3|opus] [-l LANG]
                                  Text→speech (chatterbox). Default voice Alice.wav.
   balance                        Account balance
-  usage                          Cost allocation per user tag
+  usage [opts]                   Cost per API key / dimension / model (default: this month)
+      -f, --from DATE            Start, inclusive (YYYY-MM-DD or ISO-8601)
+      -t, --to DATE              End, exclusive
+      -b, --by GROUPS            api_key,end_user,model (default api_key,end_user)
+      -j, --json                 Raw JSON
 EOF
 }
 
@@ -152,7 +156,39 @@ tts)
     echo "$out"
     ;;
 balance) api GET /v1/balance | jq . ;;
-usage) api GET /v1/usage/allocation | jq . ;;
+usage)
+    # Dates: YYYY-MM-DD (local midnight) or full ISO-8601. Default: this month.
+    tz=$(date +%z); tz="${tz:0:3}:${tz:3:2}"
+    iso() { [[ "$1" == *T* ]] && printf '%s' "$1" || printf '%sT00:00:00%s' "$1" "$tz"; }
+    from=$(date +%Y-%m-01)
+    to=$(date -v1d -v+1m +%Y-%m-01 2>/dev/null || date -d "$(date +%Y-%m-01) +1 month" +%Y-%m-01)
+    by="api_key,end_user" raw=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+        -f|--from) from=$2; shift 2 ;;
+        -t|--to) to=$2; shift 2 ;;
+        -b|--by) by=$2; shift 2 ;;
+        -j|--json) raw=1; shift ;;
+        *) die "usage: unknown option $1" ;;
+        esac
+    done
+    resp=$(api GET /v1/usage/allocation -G --data-urlencode "from=$(iso "$from")" \
+        --data-urlencode "to=$(iso "$to")" --data-urlencode "group_by=$by")
+    if [[ $raw -eq 1 ]]; then printf '%s\n' "$resp"; exit 0; fi
+    echo "Usage $from → $to (to exclusive), grouped by $by"
+    printf '%s' "$resp" | jq -r '
+        def eur: (. / 1e9 * 100 | round / 100 | tostring) as $s
+            | ($s | split(".")) as $p
+            | "€" + $p[0] + "." + (($p[1] // "") + "00")[0:2];
+        (["KEY", "DIMENSION", "MODEL", "REQUESTS", "TOKENS", "EXCL. VAT", "INCL. VAT"] | @tsv),
+        (.data | sort_by(-.cost_gross_nanoeur)[] | [
+            (.api_key_name // "-"), (.end_user_ref // "Not dimensioned"), (.model_id // "-"),
+            .requests, .total_tokens, (.cost_net_nanoeur | eur), (.cost_gross_nanoeur | eur)
+        ] | @tsv),
+        (["TOTAL", "-", "-", (.data | map(.requests) | add // 0), (.data | map(.total_tokens) | add // 0),
+          (.data | map(.cost_net_nanoeur) | add // 0 | eur), (.data | map(.cost_gross_nanoeur) | add // 0 | eur)] | @tsv)
+    ' | column -t -s $'\t'
+    ;;
 help|-h|--help) usage ;;
 *) usage >&2; exit 2 ;;
 esac
