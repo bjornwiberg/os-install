@@ -51,6 +51,22 @@ local GRUNDEN_AGENTS = vim.json.encode({
     },
 })
 
+-- Grunden sessions run with bypassPermissions (auto mode's classifier needs
+-- an Anthropic model, so it can't gate anything here). Deny rules still
+-- apply in bypass mode — verified — so block the destructive stuff. Each
+-- rule is listed plain and with the `rtk ` prefix the RTK hook rewrites to.
+local GRUNDEN_DENY = {}
+for _, rule in ipairs({
+    "rm -rf", "rm -fr", "rm -r", "sudo", "dd", "mkfs", "diskutil",
+    "shutdown", "reboot", "chmod -R", "chown -R",
+    "git push --force", "git push -f", "git push --force-with-lease",
+    "git reset --hard", "git clean", "git checkout --", "git restore",
+    "git branch -D", "git stash drop", "git stash clear",
+}) do
+    GRUNDEN_DENY[#GRUNDEN_DENY + 1] = "Bash(" .. rule .. ":*)"
+    GRUNDEN_DENY[#GRUNDEN_DENY + 1] = "Bash(rtk " .. rule .. ":*)"
+end
+
 -- Sessions launched from <leader>ao that aren't plain claude_N slots.
 local function is_ext_name(name)
     return name:match("^ollama%-") ~= nil or name:match("^grunden%-") ~= nil
@@ -1134,17 +1150,13 @@ local keys = {
                     Config.cli.tools[name] = {
                         -- `env -u` instead of env = { KEY = false }: sidekick maps
                         -- false to `tmux new-session -u`, which tmux doesn't support.
-                        cmd = {
+                        cmd = vim.list_extend({
                             "env", "-u", "ANTHROPIC_API_KEY", CLI_TOOL, "--model", choice.model,
                             "--append-system-prompt-file", GRUNDEN_PROMPT_FILE,
                             "--agents", GRUNDEN_AGENTS,
-                            -- Auto mode's safety classifier needs an Anthropic model,
-                            -- so on Grunden it denies every Bash call. Auto-accept file
-                            -- edits instead and pre-allow only the grunden helper;
-                            -- other Bash still prompts.
-                            "--permission-mode", "acceptEdits",
-                            "--allowedTools", "Bash(grunden:*)",
-                        },
+                            "--permission-mode", "bypassPermissions",
+                            "--disallowedTools", -- variadic: must stay last
+                        }, vim.deepcopy(GRUNDEN_DENY)),
                         env = {
                             ANTHROPIC_BASE_URL = choice.grunden.url,
                             ANTHROPIC_AUTH_TOKEN = choice.grunden.key,

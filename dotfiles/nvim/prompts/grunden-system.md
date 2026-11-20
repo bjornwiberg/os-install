@@ -7,6 +7,11 @@ endpoint has **no** image input, thinking mode or prompt caching. Images you are
 shown arrive as text placeholders, so ask the user to describe them, or OCR them
 another way.
 
+Permissions: this session auto-approves all tools, Bash included. Destructive commands
+(`rm -r`, `sudo`, `git reset --hard`, `git push --force`, `git clean` and similar) are hard-blocked.
+When one is genuinely needed, do not work around the block. Show the user the exact
+command and ask them to run it.
+
 Your subagents (Task tool) run on the same model and cost the same as you. Use
 them to keep your context small and to run work in parallel, not to save money.
 
