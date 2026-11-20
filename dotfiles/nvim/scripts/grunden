@@ -12,7 +12,8 @@ fi
 : "${GRUNDEN_API_KEY:?GRUNDEN_API_KEY missing (set it in $ENV_FILE)}"
 BASE="${GRUNDEN_API_URL:-https://api.grunden.ai}"; BASE="${BASE%/}"
 CHAT_MODEL="${GRUNDEN_CHAT_MODEL:-deepseek-v4.1-flash-1017}"
-TAG="${GRUNDEN_USER_TAG:-claude-code}"
+# Optional cost dimension (`user` field); unset = "Not dimensioned".
+TAG="${GRUNDEN_USER_TAG:-}"
 
 die() { echo "grunden: $*" >&2; exit 1; }
 
@@ -80,7 +81,7 @@ ask)
         esac
     done
     prompt="${args[*]:-}"
-    if [[ ! -t 0 ]]; then
+    if [[ -p /dev/stdin || -f /dev/stdin ]]; then
         stdin=$(cat)
         [[ -n "$stdin" ]] && prompt="${prompt:+$prompt
 
@@ -89,10 +90,10 @@ ask)
     [[ -n "$prompt" ]] || die "ask: empty prompt"
     resp=$(jq -n --arg m "$CHAT_MODEL" --arg e "$effort" --arg s "$system" \
         --arg p "$prompt" --argjson n "$max_tokens" --arg u "$TAG" '{
-            model: $m, reasoning_effort: $e, max_tokens: $n, user: $u,
+            model: $m, reasoning_effort: $e, max_tokens: $n,
             messages: ((if $s != "" then [{role:"system",content:$s}] else [] end)
                        + [{role:"user",content:$p}])
-        }' | json_post /v1/chat/completions)
+        } + (if $u != "" then {user: $u} else {} end)' | json_post /v1/chat/completions)
     if [[ $raw -eq 1 ]]; then printf '%s\n' "$resp"
     else printf '%s\n' "$resp" | jq -r '.choices[0].message.content // empty'
     fi
