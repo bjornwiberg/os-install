@@ -90,8 +90,8 @@ grunden <command> [options]
   claude [MODEL] [ARGS...]       Start an interactive Claude Code session on a
                                  Grunden chat model (alias or id; default glm).
                                  Extra args pass through to `claude` (e.g. -p,
-                                 --resume). Needs the config dir written by
-                                 ai.lua (<leader>ao once per nvim restart).
+                                 --resume). As root: acceptEdits unless
+                                 GRUNDEN_ROOT_BYPASS=1 (then full bypass).
   balance                        Account balance
   usage [opts]                   Cost per API key / dimension / model (default: this month)
       -f, --from DATE            Start, inclusive (YYYY-MM-DD or ISO-8601)
@@ -251,19 +251,30 @@ claude)
     for a in "${pass[@]}"; do
         case "$a" in -p|--print|-e|--expand) interactive=0 ;; esac
     done
-    # Running as root (e.g. inside a container): Claude Code refuses
-    # bypassPermissions for root outside a declared sandbox. IS_SANDBOX=1 is
-    # its own escape hatch for deliberate root containers (devcontainer,
-    # docker -u 0). We only set it when actually root, never locally.
-    root_extra=()
+    # Running as root (dev VM, container): Claude Code refuses
+    # bypassPermissions for root outside a declared sandbox. On a persistent
+    # machine that refusal is right — full bypass as root is too much — so
+    # root defaults to acceptEdits (auto-approve file edits, still ask for
+    # Bash). Set GRUNDEN_ROOT_BYPASS=1 to opt in to full bypass on a machine
+    # you consider disposable; that sets IS_SANDBOX=1 (Claude Code's own
+    # escape hatch for deliberate root environments).
+    root_mode=""
     if [[ "$(id -u)" == 0 ]]; then
-        root_extra=(IS_SANDBOX=1)
-        echo "grunden: running as root — setting IS_SANDBOX=1 so Claude Code accepts bypass mode" >&2
+        if [[ "${GRUNDEN_ROOT_BYPASS:-}" == 1 ]]; then
+            root_mode="bypass"
+        else
+            root_mode="acceptEdits"
+            echo "grunden: running as root — using acceptEdits (Bash asks first). GRUNDEN_ROOT_BYPASS=1 for full bypass." >&2
+        fi
     fi
+    mode_args=(--permission-mode bypassPermissions)
+    [[ "$root_mode" == "acceptEdits" ]] && mode_args=(--permission-mode acceptEdits)
+    sandbox_env=()
+    [[ "$root_mode" == "bypass" ]] && sandbox_env=(IS_SANDBOX=1)
     if [[ $interactive -eq 1 && -t 0 ]]; then
         # Interactive: let Claude Code own the terminal completely.
         exec env -u ANTHROPIC_API_KEY \
-            "${root_extra[@]}" \
+            "${sandbox_env[@]}" \
             ANTHROPIC_BASE_URL="$BASE" ANTHROPIC_AUTH_TOKEN="$GRUNDEN_API_KEY" \
             ANTHROPIC_MODEL="$id" ANTHROPIC_DEFAULT_OPUS_MODEL="$id" \
             ANTHROPIC_DEFAULT_SONNET_MODEL="$id" \
@@ -275,11 +286,11 @@ claude)
             claude --model "$id" \
             --append-system-prompt-file "$CONF_DIR/system-prompt.md" \
             --agents "$(cat "$CONF_DIR/agents.json")" \
-            --permission-mode bypassPermissions \
+            "${mode_args[@]}" \
             --disallowedTools "${deny[@]}" "${pass[@]}"
     else
         env -u ANTHROPIC_API_KEY \
-            "${root_extra[@]}" \
+            "${sandbox_env[@]}" \
             ANTHROPIC_BASE_URL="$BASE" ANTHROPIC_AUTH_TOKEN="$GRUNDEN_API_KEY" \
             ANTHROPIC_MODEL="$id" ANTHROPIC_DEFAULT_OPUS_MODEL="$id" \
             ANTHROPIC_DEFAULT_SONNET_MODEL="$id" \
@@ -291,7 +302,7 @@ claude)
             claude --model "$id" \
             --append-system-prompt-file "$CONF_DIR/system-prompt.md" \
             --agents "$(cat "$CONF_DIR/agents.json")" \
-            --permission-mode bypassPermissions \
+            "${mode_args[@]}" \
             --disallowedTools "${deny[@]}" "${pass[@]}" < /dev/null
     fi
     ;;
