@@ -58,22 +58,47 @@ local GRUNDEN_AGENTS = vim.json.encode({
 -- an Anthropic model, so it can't gate anything here). Deny rules still
 -- apply in bypass mode — verified — so block the destructive stuff. Each
 -- rule is listed plain and with the `rtk ` prefix the RTK hook rewrites to.
-local GRUNDEN_DENY = {}
-for _, rule in ipairs({
+local GRUNDEN_DENY_RULES = {
     "rm -rf", "rm -fr", "rm -r", "sudo", "dd", "mkfs", "diskutil",
     "shutdown", "reboot", "chmod -R", "chown -R",
     "git push --force", "git push -f", "git push --force-with-lease",
     "git reset --hard", "git clean", "git checkout --", "git restore",
     "git branch -D", "git stash drop", "git stash clear",
-}) do
+}
+local GRUNDEN_DENY = {}
+for _, rule in ipairs(GRUNDEN_DENY_RULES) do
     GRUNDEN_DENY[#GRUNDEN_DENY + 1] = "Bash(" .. rule .. ":*)"
     GRUNDEN_DENY[#GRUNDEN_DENY + 1] = "Bash(rtk " .. rule .. ":*)"
 end
 
+-- Shared Grunden config dir, also used by `grunden claude` outside nvim:
+-- the startup prompt, the grunden-worker agent and the deny list. Written
+-- on startup so the CLI and <leader>ao never drift apart.
+local GRUNDEN_CONF_DIR = GRUNDEN_SCRIPTS_DIR .. "/grunden-claude"
+local function write_grunden_conf()
+    local ok_err = vim.fn.mkdir(GRUNDEN_CONF_DIR, "p")
+    local f = io.open(GRUNDEN_CONF_DIR .. "/system-prompt.md", "w")
+    if f then
+        f:write(table.concat(vim.fn.readfile(GRUNDEN_PROMPT_FILE), "\n"))
+        f:close()
+    end
+    f = io.open(GRUNDEN_CONF_DIR .. "/agents.json", "w")
+    if f then f:write(GRUNDEN_AGENTS); f:close() end
+    f = io.open(GRUNDEN_CONF_DIR .. "/deny.txt", "w")
+    if f then
+        for _, rule in ipairs(GRUNDEN_DENY) do f:write(rule .. "\n") end
+        f:close()
+    end
+    return ok_err
+end
+
 -- Sessions launched from <leader>ao that aren't plain claude_N slots.
 local function is_ext_name(name)
-    return name:match("^ollama%-") ~= nil or name:match("^grunden%-") ~= nil
+    return name:match("^ollama%-") ~= nil or name:match("^gr%-") ~= nil
 end
+
+-- Write the shared config now, on every plugin load.
+write_grunden_conf()
 
 -- Module-level state for dynamic session management
 local _tool_base = nil
@@ -167,8 +192,15 @@ local function reconnect_sessions()
     for _, line in ipairs(lines) do
         local tool_name, hash = line:match("^(.-) (%w+)$")
         if tool_name and hash and is_cli_name(tool_name) and not Config.cli.tools[tool_name] then
-            local expected_len = 16 - #tool_name
-            if expected_len > 0 and #hash == expected_len and full_hash:sub(1, expected_len) == hash then
+            -- Sidekick's sid is "<tool> <sha256(cwd):sub(1, 16 - #tool)>". For
+            -- names longer than 15 chars (all grunden-*) that is a negative
+            -- count, so tmux strips it to "" and the session name is just
+            -- "<tool> e" (tmux appends a suffix char). Accept both shapes.
+            local expected_len = math.max(16 - #tool_name, 0)
+            local hash_ok = expected_len > 0
+                and #hash == expected_len and full_hash:sub(1, expected_len) == hash
+            local long_name_ok = expected_len == 0 and #hash <= 2
+            if hash_ok or long_name_ok then
                 if is_ext_name(tool_name) then
                     -- Original model isn't recoverable from the munged name,
                     -- but cmd is unused for `tmux new -A` when the session
@@ -565,7 +597,7 @@ function _G.__sidekick_agent_tabs()
             local hl = (name == _active_session) and "%#TabLineSel#" or "%#TabLine#"
             local label = tostring(i)
             local model = name:match("^ollama%-(.+)$")
-            local g = name:match("^grunden%-(.+)$")
+            local g = name:match("^gr%-(.+)$")
             if g then model = "G·" .. g end
             if model then
                 if #model > 16 then model = model:sub(1, 15) .. "…" end
@@ -792,7 +824,7 @@ local keys = {
                     if not Config.cli.tools[choice.active_in] then
                         if choice.active_in:match("^ollama%-") then
                             Config.cli.tools[choice.active_in] = { cmd = { "ollama" } }
-                        elseif choice.active_in:match("^grunden%-") then
+                        elseif choice.active_in:match("^gr%-") then
                             Config.cli.tools[choice.active_in] = { cmd = { CLI_TOOL } }
                         else
                             Config.cli.tools[choice.active_in] = make_tool()
@@ -1157,8 +1189,12 @@ local keys = {
             }, function(choice)
                 if not choice then return end
                 if choice.grunden then
-                    -- tmux rewrites "." and ":" in session names, so keep it [%w-].
-                    local name = "grunden-" .. choice.model:gsub("[^%w%-]", "-")
+                    -- Sidekick's sid is "<tool> <sha256(cwd):sub(1, 16-#tool)>",
+                    -- so the tool name must stay under ~15 chars or the hash
+                    -- part degenerates (empty for long names → every model
+                    -- collides on the same tmux session). Use a short stable
+                    -- prefix + the model's alias from the grunden catalog.
+                    local name = "gr-" .. (choice.alias ~= "" and choice.alias or choice.model)
                     local Config = require("sidekick.config")
                     Config.cli.tools = Config.cli.tools or {}
                     Config.cli.tools[name] = {

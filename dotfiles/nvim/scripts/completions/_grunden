@@ -19,6 +19,7 @@ _grunden() {
         'pii:Detect and mask Swedish PII (names, phone numbers, personnummer)'
         'transcribe:Speech to text (kb-whisper-large, pianissimo-sv/-da), max 50 MB'
         'tts:Text to speech with chatterbox; requires -o OUT'
+        'claude:Start an interactive Claude Code session on a Grunden chat model'
         'balance:Account balance'
         'usage:Cost for this API key per dimension/model (default this month; -a = whole org)'
         'help:Show usage'
@@ -56,6 +57,22 @@ _grunden() {
         ;;
     rerank)
         _arguments '1:query: ' '*:document (or pipe one per line via stdin): '
+        ;;
+    claude)
+        # First bare word = model (matches grunden's arg loop); the rest are
+        # passed through to claude itself.
+        if (( CURRENT == 3 )); then
+            local -a models=(
+                'glm:big GLM, hardest tasks (default)'
+                'deepseek:Grunden default, image input'
+                'flash:cheap all-rounder, subagent model'
+            )
+            _describe -t claude-models 'chat model' models
+        else
+            _arguments \
+                '(-M --model)'{-M,--model}'[chat model]:model:((glm\:"big GLM, hardest tasks (default)" deepseek\:"Grunden default, image input" flash\:"cheap all-rounder, subagent model"))' \
+                '*:claude args: '
+        fi
         ;;
     usage)
         _arguments \

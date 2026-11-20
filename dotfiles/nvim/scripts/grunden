@@ -38,6 +38,14 @@ TAG="${GRUNDEN_USER_TAG:-}"
 
 die() { echo "grunden: $*" >&2; exit 1; }
 
+# Resolve through the ~/.local/bin symlink so CONF_DIR lands in the repo.
+SELF=$(readlink -f "${BASH_SOURCE[0]}")
+SELF_DIR=$(cd -- "$(dirname -- "$SELF")" && pwd -P)
+CONF_DIR="$SELF_DIR/grunden-claude"   # committed config; ai.lua rewrites it on nvim load
+
+# Cheap model for Claude Code subagents / background calls (from ai.lua).
+CHEAP_MODEL="${GRUNDEN_CHEAP_MODEL:-glm-5.3-flash}"
+
 # Read text from remaining args, or stdin when no args / "-".
 text_arg() {
     if [[ $# -eq 0 || "$1" == "-" ]]; then cat; else printf '%s' "$*"; fi
@@ -79,6 +87,11 @@ grunden <command> [options]
                                  pianissimo-sv / pianissimo-da). Max 50 MB.
   tts [TEXT|-] -o OUT [-v VOICE] [-f wav|mp3|opus] [-l LANG]
                                  Text→speech (chatterbox). Default voice Alice.wav.
+  claude [MODEL] [ARGS...]       Start an interactive Claude Code session on a
+                                 Grunden chat model (alias or id; default glm).
+                                 Extra args pass through to `claude` (e.g. -p,
+                                 --resume). Needs the config dir written by
+                                 ai.lua (<leader>ao once per nvim restart).
   balance                        Account balance
   usage [opts]                   Cost per API key / dimension / model (default: this month)
       -f, --from DATE            Start, inclusive (YYYY-MM-DD or ISO-8601)
@@ -204,6 +217,72 @@ tts)
             -H "Content-Type: application/json" --data-binary @- -o "$out" "$BASE/v1/audio/speech" \
         || die "tts failed"
     echo "$out"
+    ;;
+claude)
+    model= pass=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+        -M|--model) model=$2; shift 2 ;;
+        --) shift; pass+=("$@"); break ;;
+        # First bare word that names a known model (id or alias) selects it;
+        # anything else passes through to claude, flags included.
+        *) if [[ -z "$model" ]] && printf '%s\n' "$CATALOG" | awk -F'|' -v m="$1" '$1==m || $2==m' | grep -q .; then
+               model=$1
+           else pass+=("$1"); fi; shift ;;
+        esac
+    done
+    : "${model:=glm}"
+    line=$(resolve_model "$model")
+    IFS='|' read -r id _ _ _ ctx _ def_effort agentic _ <<<"$line"
+    [[ "$agentic" == yes ]] || die "claude: $id is not usable as a Claude Code model (agentic=no, context $ctx)"
+    for f in system-prompt.md agents.json deny.txt; do
+        [[ -r "$CONF_DIR/$f" ]] || die "claude: $CONF_DIR/$f missing (run from the dotfiles repo)"
+    done
+    mapfile -t deny < "$CONF_DIR/deny.txt"
+    # Small-context models: cap the output reservation and tell Claude Code the
+    # real window so it auto-compacts in time (mirrors ai.lua).
+    k=${ctx%k}; extra=()
+    if [[ "$k" != "$ctx" ]]; then
+        extra=(CLAUDE_CODE_MAX_CONTEXT_TOKENS=$((k * 1000)) CLAUDE_CODE_MAX_OUTPUT_TOKENS=4096)
+    fi
+    # `-p` (print mode) reads the prompt from the remaining args; without it
+    # Claude Code would try to read stdin interactively.
+    interactive=1
+    for a in "${pass[@]}"; do
+        case "$a" in -p|--print|-e|--expand) interactive=0 ;; esac
+    done
+    if [[ $interactive -eq 1 && -t 0 ]]; then
+        # Interactive: let Claude Code own the terminal completely.
+        exec env -u ANTHROPIC_API_KEY \
+            ANTHROPIC_BASE_URL="$BASE" ANTHROPIC_AUTH_TOKEN="$GRUNDEN_API_KEY" \
+            ANTHROPIC_MODEL="$id" ANTHROPIC_DEFAULT_OPUS_MODEL="$id" \
+            ANTHROPIC_DEFAULT_SONNET_MODEL="$id" \
+            ANTHROPIC_DEFAULT_HAIKU_MODEL="$CHEAP_MODEL" \
+            ANTHROPIC_SMALL_FAST_MODEL="$CHEAP_MODEL" \
+            CLAUDE_CODE_SUBAGENT_MODEL="$CHEAP_MODEL" \
+            CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+            "${extra[@]}" \
+            claude --model "$id" \
+            --append-system-prompt-file "$CONF_DIR/system-prompt.md" \
+            --agents "$(cat "$CONF_DIR/agents.json")" \
+            --permission-mode bypassPermissions \
+            --disallowedTools "${deny[@]}" "${pass[@]}"
+    else
+        env -u ANTHROPIC_API_KEY \
+            ANTHROPIC_BASE_URL="$BASE" ANTHROPIC_AUTH_TOKEN="$GRUNDEN_API_KEY" \
+            ANTHROPIC_MODEL="$id" ANTHROPIC_DEFAULT_OPUS_MODEL="$id" \
+            ANTHROPIC_DEFAULT_SONNET_MODEL="$id" \
+            ANTHROPIC_DEFAULT_HAIKU_MODEL="$CHEAP_MODEL" \
+            ANTHROPIC_SMALL_FAST_MODEL="$CHEAP_MODEL" \
+            CLAUDE_CODE_SUBAGENT_MODEL="$CHEAP_MODEL" \
+            CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+            "${extra[@]}" \
+            claude --model "$id" \
+            --append-system-prompt-file "$CONF_DIR/system-prompt.md" \
+            --agents "$(cat "$CONF_DIR/agents.json")" \
+            --permission-mode bypassPermissions \
+            --disallowedTools "${deny[@]}" "${pass[@]}" < /dev/null
+    fi
     ;;
 balance) api GET /v1/balance | jq . ;;
 usage)
