@@ -1,0 +1,68 @@
+#compdef grunden
+# zsh completion for the grunden CLI (../grunden). Loaded via fpath in .zshrc.
+
+_grunden_voices() {
+    local -a voices=(
+        Abigail Adrian Alexander Alice Austin Axel Connor Cora Elena Eli Emily
+        Everett Gabriel Gianna Henry Ian Jade Jeremiah Jordan Julian Layla
+        Leonardo Michael Miles Olivia Ryan Taylor Thomas
+    )
+    _describe -t voices 'voice' "(${voices[*]/%/.wav})"
+}
+
+_grunden() {
+    local -a commands=(
+        'models:List models with type, endpoint, price and reasoning levels'
+        'ask:One-shot chat completion (default effort low, fast and cheap); stdin is appended'
+        'embed:Embeddings with bge-m3 (1024-dim); stdin = one text per line'
+        'rerank:Rank docs against a query (args or stdin lines) with bge-reranker'
+        'pii:Detect and mask Swedish PII (names, phone numbers, personnummer)'
+        'transcribe:Speech to text (kb-whisper-large, pianissimo-sv/-da), max 50 MB'
+        'tts:Text to speech with chatterbox; requires -o OUT'
+        'balance:Account balance'
+        'usage:Cost allocation per user tag'
+        'help:Show usage'
+    )
+
+    if (( CURRENT == 2 )); then
+        _describe -t commands 'grunden command' commands
+        return
+    fi
+
+    local cmd=${words[2]}
+    curcontext="${curcontext%:*:*}:grunden-$cmd:"
+    case $cmd in
+    ask)
+        _arguments -s \
+            '(-e --effort)'{-e,--effort}'[reasoning effort]:effort:((low\:"fast and cheap (default)" high\:"deeper" max\:"deepest, slowest"))' \
+            '(-s --system)'{-s,--system}'[system prompt]:system prompt: ' \
+            '(-m --max-tokens)'{-m,--max-tokens}'[max output tokens (default 4096)]:tokens:(512 1024 2048 4096 8192)' \
+            '(-j --json)'{-j,--json}'[print raw JSON incl. token usage]' \
+            '*:prompt (or pipe text via stdin): '
+        ;;
+    transcribe)
+        _arguments \
+            '(-m --model)'{-m,--model}'[STT engine]:model:((kb-whisper-large\:"KB-Whisper Large (default)" pianissimo-sv\:"Pianissimo Swedish" pianissimo-da\:"Pianissimo Danish"))' \
+            '1:audio file:_files -g "*.(wav|mp3|m4a|ogg|opus|flac|webm|mp4)(-.)"'
+        ;;
+    tts)
+        _arguments \
+            '(-o --out)'{-o,--out}'[output file (format from extension)]:output file:_files -g "*.(wav|mp3|opus)(-.)"' \
+            '(-v --voice)'{-v,--voice}'[voice (default Alice.wav)]:voice:_grunden_voices' \
+            '(-f --format)'{-f,--format}'[audio format]:format:(wav mp3 opus)' \
+            '(-l --language)'{-l,--language}'[language code]:language:(sv en da no fi de fr es)' \
+            '*:text (or pipe via stdin): '
+        ;;
+    rerank)
+        _arguments '1:query: ' '*:document (or pipe one per line via stdin): '
+        ;;
+    embed|pii)
+        _arguments '*:text (or - / pipe via stdin): '
+        ;;
+    *)
+        _message 'no arguments'
+        ;;
+    esac
+}
+
+_grunden "$@"

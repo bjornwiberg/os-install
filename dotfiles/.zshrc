@@ -24,6 +24,8 @@ export EDITOR=nvim
 setopt HIST_IGNORE_SPACE
 ZSH_THEME="mortalscumbag"
 plugins=(git)
+# Custom completions (grunden CLI); must be on fpath before oh-my-zsh runs compinit
+fpath=(~/os-install/dotfiles/nvim/scripts/completions $fpath)
 source $ZSH/oh-my-zsh.sh
 . ~/.aliases
 . ~/.shortcuts
