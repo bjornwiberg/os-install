@@ -1139,9 +1139,10 @@ local keys = {
                             "--append-system-prompt-file", GRUNDEN_PROMPT_FILE,
                             "--agents", GRUNDEN_AGENTS,
                             -- Auto mode's safety classifier needs an Anthropic model,
-                            -- so on Grunden it denies every Bash call. Use default
-                            -- mode and pre-allow only the grunden helper.
-                            "--permission-mode", "default",
+                            -- so on Grunden it denies every Bash call. Auto-accept file
+                            -- edits instead and pre-allow only the grunden helper;
+                            -- other Bash still prompts.
+                            "--permission-mode", "acceptEdits",
                             "--allowedTools", "Bash(grunden:*)",
                         },
                         env = {
