@@ -66,11 +66,14 @@ _grunden() {
                 'glm:big GLM, hardest tasks (default)'
                 'deepseek:Grunden default, image input'
                 'flash:cheap all-rounder, subagent model'
+                'bypass:full permission bypass (default; root falls back to edits)'
+                'edits:acceptEdits — file edits auto, Bash asks'
             )
-            _describe -t claude-models 'chat model' models
+            _describe -t claude-models 'chat model or mode' models
         else
             _arguments \
                 '(-M --model)'{-M,--model}'[chat model]:model:((glm\:"big GLM, hardest tasks (default)" deepseek\:"Grunden default, image input" flash\:"cheap all-rounder, subagent model"))' \
+            '(-m --mode)'{-m,--mode}'[permission mode]:mode:((bypass\:"full bypass (default; root falls back to edits)" edits\:"acceptEdits — file edits auto, Bash asks"))' \
                 '*:claude args: '
         fi
         ;;

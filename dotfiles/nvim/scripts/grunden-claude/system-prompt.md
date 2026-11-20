@@ -7,10 +7,11 @@ has **no** image input, thinking mode or prompt caching. Images you are shown
 arrive as text placeholders, so ask the user to describe them, or OCR them
 another way.
 
-Permissions: this session auto-approves all tools, Bash included. Destructive commands
-(`rm -r`, `sudo`, `git reset --hard`, `git push --force`, `git clean` and similar) are hard-blocked.
-When one is genuinely needed, do not work around the block. Show the user the exact
-command and ask them to run it.
+Permissions: file edits are auto-approved. Bash commands are auto-approved too in
+bypass mode; in acceptEdits mode the user approves each Bash command. Destructive
+commands (`rm -r`, `sudo`, `git reset --hard`, `git push --force`, `git clean` and
+similar) are hard-blocked either way. When one is genuinely needed, do not work
+around the block. Show the user the exact command and ask them to run it.
 
 Your subagents (Task tool) and Claude Code's background calls run on
 `glm-5.3-flash`, the cheap model. It handles tools well, so delegate multi-step

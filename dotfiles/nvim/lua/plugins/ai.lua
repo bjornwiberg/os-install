@@ -1158,11 +1158,16 @@ local keys = {
                         if id then
                             -- "31k" -> 31000; "1M" (or unknown) -> nil = Claude Code's default.
                             local k = ctx and ctx:match("^(%d+)k$")
-                            table.insert(items, {
-                                model = id, alias = alias, price = price,
-                                context = k and tonumber(k) * 1000 or nil,
-                                grunden = { url = base, key = genv.GRUNDEN_API_KEY },
-                            })
+                            -- Two entries per model: full bypass, or acceptEdits
+                            -- (auto-approve file edits, Bash asks first) — the
+                            -- safe pick on root/persistent machines.
+                            for _, mode in ipairs({ "bypass", "acceptEdits" }) do
+                                table.insert(items, {
+                                    model = id, alias = alias, price = price, mode = mode,
+                                    context = k and tonumber(k) * 1000 or nil,
+                                    grunden = { url = base, key = genv.GRUNDEN_API_KEY },
+                                })
+                            end
                         end
                     end
                     local rank = {}
@@ -1182,13 +1187,26 @@ local keys = {
             vim.ui.select(items, {
                 prompt = "launch claude --model:",
                 format_item = function(item)
-                    if item.grunden then return item.model .. "  (grunden " .. item.price .. " €/1M)" end
+                    if item.grunden then
+                        return item.model .. "  (grunden " .. item.price .. " €/1M, "
+                            .. (item.mode == "bypass" and "bypass" or "acceptEdits") .. ")"
+                    end
                     if not item.host then return item.model end
                     return item.model .. "  (" .. item.host:gsub("^https?://", ""):gsub(":%d+$", "") .. ")"
                 end,
             }, function(choice)
                 if not choice then return end
                 if choice.grunden then
+                    -- Permission mode: the picker entry decides, but root never
+                    -- gets full bypass unless GRUNDEN_ROOT_BYPASS=1 is set
+                    -- (same rule as `grunden claude`; Claude Code itself
+                    -- refuses bypass for root outside a declared sandbox).
+                    local perm_mode = choice.mode == "acceptEdits" and "acceptEdits" or "bypassPermissions"
+                    if perm_mode == "bypassPermissions" and vim.uv.getuid() == 0
+                        and vim.env.GRUNDEN_ROOT_BYPASS ~= "1" then
+                        perm_mode = "acceptEdits"
+                        vim.notify("Root: using acceptEdits (GRUNDEN_ROOT_BYPASS=1 for full bypass)", vim.log.levels.WARN)
+                    end
                     -- Sidekick's sid is "<tool> <sha256(cwd):sub(1, 16-#tool)>",
                     -- so the tool name must stay under ~15 chars or the hash
                     -- part degenerates (empty for long names → every model
@@ -1204,7 +1222,7 @@ local keys = {
                             "env", "-u", "ANTHROPIC_API_KEY", CLI_TOOL, "--model", choice.model,
                             "--append-system-prompt-file", GRUNDEN_PROMPT_FILE,
                             "--agents", GRUNDEN_AGENTS,
-                            "--permission-mode", "bypassPermissions",
+                            "--permission-mode", perm_mode,
                             "--disallowedTools", -- variadic: must stay last
                         }, vim.deepcopy(GRUNDEN_DENY)),
                         env = {

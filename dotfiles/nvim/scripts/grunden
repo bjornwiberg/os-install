@@ -87,11 +87,12 @@ grunden <command> [options]
                                  pianissimo-sv / pianissimo-da). Max 50 MB.
   tts [TEXT|-] -o OUT [-v VOICE] [-f wav|mp3|opus] [-l LANG]
                                  Text→speech (chatterbox). Default voice Alice.wav.
-  claude [MODEL] [ARGS...]       Start an interactive Claude Code session on a
+  claude [MODEL] [MODE] [ARGS...]  Start an interactive Claude Code session on a
                                  Grunden chat model (alias or id; default glm).
-                                 Extra args pass through to `claude` (e.g. -p,
-                                 --resume). As root: acceptEdits unless
-                                 GRUNDEN_ROOT_BYPASS=1 (then full bypass).
+                                 MODE: bypass (default) or edits (=acceptEdits:
+                                 file edits auto, Bash asks). As root, bypass
+                                 falls back to edits unless GRUNDEN_ROOT_BYPASS=1.
+                                 Further args pass through to `claude` (-p, --resume).
   balance                        Account balance
   usage [opts]                   Cost per API key / dimension / model (default: this month)
       -f, --from DATE            Start, inclusive (YYYY-MM-DD or ISO-8601)
@@ -219,19 +220,23 @@ tts)
     echo "$out"
     ;;
 claude)
-    model= pass=()
+    model= mode= pass=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
         -M|--model) model=$2; shift 2 ;;
+        -m|--mode) mode=$2; shift 2 ;;
         --) shift; pass+=("$@"); break ;;
-        # First bare word that names a known model (id or alias) selects it;
-        # anything else passes through to claude, flags included.
+        # First bare word naming a known model selects it; a bare "bypass"/"edits"
+        # selects the permission mode; anything else passes through to claude.
         *) if [[ -z "$model" ]] && printf '%s\n' "$CATALOG" | awk -F'|' -v m="$1" '$1==m || $2==m' | grep -q .; then
                model=$1
+           elif [[ -z "$mode" && ( "$1" == bypass || "$1" == edits ) ]]; then
+               mode=$1
            else pass+=("$1"); fi; shift ;;
         esac
     done
     : "${model:=glm}"
+    : "${mode:=bypass}"
     line=$(resolve_model "$model")
     IFS='|' read -r id _ _ _ ctx _ def_effort agentic _ <<<"$line"
     [[ "$agentic" == yes ]] || die "claude: $id is not usable as a Claude Code model (agentic=no, context $ctx)"
@@ -258,19 +263,17 @@ claude)
     # Bash). Set GRUNDEN_ROOT_BYPASS=1 to opt in to full bypass on a machine
     # you consider disposable; that sets IS_SANDBOX=1 (Claude Code's own
     # escape hatch for deliberate root environments).
-    root_mode=""
-    if [[ "$(id -u)" == 0 ]]; then
-        if [[ "${GRUNDEN_ROOT_BYPASS:-}" == 1 ]]; then
-            root_mode="bypass"
-        else
-            root_mode="acceptEdits"
-            echo "grunden: running as root — using acceptEdits (Bash asks first). GRUNDEN_ROOT_BYPASS=1 for full bypass." >&2
-        fi
+    # Root guard: Claude Code refuses bypass for root outside a declared
+    # sandbox. Persistent dev VMs shouldn't run full bypass as root anyway,
+    # so downgrade to acceptEdits unless explicitly opted in.
+    if [[ "$(id -u)" == 0 && "$mode" == bypass && "${GRUNDEN_ROOT_BYPASS:-}" != 1 ]]; then
+        mode=edits
+        echo "grunden: running as root — using acceptEdits (Bash asks first). GRUNDEN_ROOT_BYPASS=1 for full bypass." >&2
     fi
     mode_args=(--permission-mode bypassPermissions)
-    [[ "$root_mode" == "acceptEdits" ]] && mode_args=(--permission-mode acceptEdits)
+    [[ "$mode" == "edits" ]] && mode_args=(--permission-mode acceptEdits)
     sandbox_env=()
-    [[ "$root_mode" == "bypass" ]] && sandbox_env=(IS_SANDBOX=1)
+    [[ "$mode" == "bypass" && "$(id -u)" == 0 ]] && sandbox_env=(IS_SANDBOX=1)
     if [[ $interactive -eq 1 && -t 0 ]]; then
         # Interactive: let Claude Code own the terminal completely.
         exec env -u ANTHROPIC_API_KEY \
