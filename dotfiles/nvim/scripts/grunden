@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# grunden — tiny CLI over the Grunden API (https://api.grunden.ai).
+# Credentials come from ~/.grunden.env (GRUNDEN_API_KEY, GRUNDEN_API_URL).
+# Used by Claude Code sessions launched via <leader>ao to offload work to
+# cheaper/specialised Grunden models. Run `grunden help` for usage.
+set -euo pipefail
+
+ENV_FILE="${GRUNDEN_ENV_FILE:-$HOME/.grunden.env}"
+if [[ -z "${GRUNDEN_API_KEY:-}" && -r "$ENV_FILE" ]]; then
+    set -a; . "$ENV_FILE"; set +a
+fi
+: "${GRUNDEN_API_KEY:?GRUNDEN_API_KEY missing (set it in $ENV_FILE)}"
+BASE="${GRUNDEN_API_URL:-https://api.grunden.ai}"; BASE="${BASE%/}"
+CHAT_MODEL="${GRUNDEN_CHAT_MODEL:-deepseek-v4.1-flash-1017}"
+TAG="${GRUNDEN_USER_TAG:-claude-code}"
+
+die() { echo "grunden: $*" >&2; exit 1; }
+
+# Read text from remaining args, or stdin when no args / "-".
+text_arg() {
+    if [[ $# -eq 0 || "$1" == "-" ]]; then cat; else printf '%s' "$*"; fi
+}
+
+api() { # api METHOD PATH [curl args...]
+    local method=$1 path=$2; shift 2
+    local out code
+    out=$(curl -sS --max-time "${GRUNDEN_TIMEOUT:-300}" -X "$method" \
+        -H "Authorization: Bearer $GRUNDEN_API_KEY" -w $'\n%{http_code}' \
+        "$@" "$BASE$path") || die "request failed: $path"
+    code=${out##*$'\n'}; out=${out%$'\n'*}
+    [[ "$code" == 2* ]] || die "HTTP $code from $path: $out"
+    printf '%s' "$out"
+}
+
+json_post() { api POST "$1" -H "Content-Type: application/json" --data-binary @-; }
+
+usage() {
+    cat <<'EOF'
+grunden <command> [options]
+
+  models                         List models (id, type, endpoint, price/1M in→out)
+  ask [opts] [PROMPT|-]          One-shot chat completion, prints the answer.
+      -e, --effort low|high|max  Reasoning effort (default: low — fast & cheap)
+      -s, --system TEXT          System prompt
+      -m, --max-tokens N         Max output tokens (default 4096)
+      -j, --json                 Print raw JSON response (incl. usage)
+      PROMPT may be given as args or via stdin; with both, stdin is
+      appended after the args (handy: `cat file | grunden ask "Summarise:"`).
+  embed [TEXT|-]                 Embedding (bge-m3, 1024-dim). Stdin: one text per line.
+                                 Prints JSON array of vectors.
+  rerank QUERY [DOC...]          Rerank docs against QUERY (docs from args or
+                                 stdin, one per line). Prints "score<TAB>index<TAB>doc".
+  pii [TEXT|-]                   Detect + mask Swedish PII. Prints JSON.
+  transcribe FILE [-m MODEL]     Speech→text (kb-whisper-large default;
+                                 pianissimo-sv / pianissimo-da). Max 50 MB.
+  tts [TEXT|-] -o OUT [-v VOICE] [-f wav|mp3|opus] [-l LANG]
+                                 Text→speech (chatterbox). Default voice Alice.wav.
+  balance                        Account balance
+  usage                          Cost allocation per user tag
+EOF
+}
+
+cmd=${1:-help}; shift || true
+case "$cmd" in
+models)
+    api GET /v1/models | jq -r '.data[] | [.id, .type, .endpoint,
+        (if .pricing then "\(.pricing.input_per_1m_tokens.amount)→\(.pricing.output_per_1m_tokens.amount) \(.pricing.input_per_1m_tokens.currency)" else "-" end),
+        ((.reasoning_levels // []) | join("/"))] | @tsv' | column -t -s $'\t'
+    ;;
+ask)
+    effort=low system="" max_tokens=4096 raw=0 args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+        -e|--effort) effort=$2; shift 2 ;;
+        -s|--system) system=$2; shift 2 ;;
+        -m|--max-tokens) max_tokens=$2; shift 2 ;;
+        -j|--json) raw=1; shift ;;
+        --) shift; args+=("$@"); break ;;
+        *) args+=("$1"); shift ;;
+        esac
+    done
+    prompt="${args[*]:-}"
+    if [[ ! -t 0 ]]; then
+        stdin=$(cat)
+        [[ -n "$stdin" ]] && prompt="${prompt:+$prompt
+
+}$stdin"
+    fi
+    [[ -n "$prompt" ]] || die "ask: empty prompt"
+    resp=$(jq -n --arg m "$CHAT_MODEL" --arg e "$effort" --arg s "$system" \
+        --arg p "$prompt" --argjson n "$max_tokens" --arg u "$TAG" '{
+            model: $m, reasoning_effort: $e, max_tokens: $n, user: $u,
+            messages: ((if $s != "" then [{role:"system",content:$s}] else [] end)
+                       + [{role:"user",content:$p}])
+        }' | json_post /v1/chat/completions)
+    if [[ $raw -eq 1 ]]; then printf '%s\n' "$resp"
+    else printf '%s\n' "$resp" | jq -r '.choices[0].message.content // empty'
+    fi
+    ;;
+embed)
+    if [[ $# -gt 0 && "$1" != "-" ]]; then input=$(jq -n --arg t "$*" '$t')
+    else input=$(jq -R . | jq -s .)
+    fi
+    jq -n --argjson i "$input" '{model:"bge-m3", input:$i}' | json_post /v1/embeddings \
+        | jq -c '[.data[].embedding]'
+    ;;
+rerank)
+    [[ $# -ge 1 ]] || die "rerank: QUERY required"
+    query=$1; shift
+    if [[ $# -gt 0 ]]; then docs=$(printf '%s\n' "$@" | jq -R . | jq -s .)
+    else docs=$(jq -R . | jq -s .)
+    fi
+    resp=$(jq -n --arg q "$query" --argjson t "$docs" '{query:$q, texts:$t}' | json_post /v1/rerank)
+    # Response shape varies between engines; normalise to score/index.
+    printf '%s' "$resp" | jq -r --argjson t "$docs" '
+        (if type == "array" then . else (.results // .data // []) end)
+        | sort_by(-(.score // .relevance_score // 0))[]
+        | (.index) as $i | [(.score // .relevance_score), $i, $t[$i]] | @tsv'
+    ;;
+pii)
+    text=$(text_arg "$@")
+    jq -n --arg t "$text" '{text:$t}' | json_post /v1/pii/redact | jq .
+    ;;
+transcribe)
+    [[ $# -ge 1 ]] || die "transcribe: FILE required"
+    file=$1; shift; model=""
+    [[ "${1:-}" == "-m" || "${1:-}" == "--model" ]] && model=$2
+    [[ -r "$file" ]] || die "cannot read $file"
+    api POST /v1/audio/transcriptions -F "file=@$file" ${model:+--form-string "model=$model"} \
+        | jq -r '.text // .'
+    ;;
+tts)
+    out="" voice="Alice.wav" fmt="" lang="" args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+        -o|--out) out=$2; shift 2 ;;
+        -v|--voice) voice=$2; shift 2 ;;
+        -f|--format) fmt=$2; shift 2 ;;
+        -l|--language) lang=$2; shift 2 ;;
+        *) args+=("$1"); shift ;;
+        esac
+    done
+    [[ -n "$out" ]] || die "tts: -o OUT required"
+    text=$(text_arg "${args[@]:-}")
+    fmt=${fmt:-${out##*.}}
+    jq -n --arg t "$text" --arg v "$voice" --arg f "$fmt" --arg l "$lang" \
+        '{model:"chatterbox", input:$t, voice:$v, response_format:$f} + (if $l != "" then {language:$l} else {} end)' \
+        | curl -sS --fail-with-body --max-time 300 -H "Authorization: Bearer $GRUNDEN_API_KEY" \
+            -H "Content-Type: application/json" --data-binary @- -o "$out" "$BASE/v1/audio/speech" \
+        || die "tts failed"
+    echo "$out"
+    ;;
+balance) api GET /v1/balance | jq . ;;
+usage) api GET /v1/usage/allocation | jq . ;;
+help|-h|--help) usage ;;
+*) usage >&2; exit 2 ;;
+esac

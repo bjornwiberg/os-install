@@ -70,6 +70,14 @@ cd ~/.config
 ln -s ~/os-install/dotfiles/nvim
 ```
 
+### Grunden CLI (optional)
+
+Needs `~/.grunden.env` with `GRUNDEN_API_KEY` and `GRUNDEN_API_URL`. Used by `<leader>ao` Grunden sessions; also handy directly (`grunden help`).
+
+```
+mkdir -p ~/.local/bin && ln -sf ~/os-install/dotfiles/nvim/scripts/grunden ~/.local/bin/grunden
+```
+
 ### Install pynvim for python3 support in nvim
 
 ```

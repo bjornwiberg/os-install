@@ -12,6 +12,50 @@ local CLI_SK_FILE = "sk/cli/" .. CLI_TOOL .. ".lua"
 -- Launching one of these sets OLLAMA_HOST for the sidekick session.
 local OLLAMA_REMOTE_HOSTS = { "http://100.104.199.46:11434" }
 
+-- Grunden (Anthropic-compatible /v1/messages). Credentials are read at
+-- runtime from this env file (GRUNDEN_API_KEY, GRUNDEN_API_URL) so they
+-- never land in the dotfiles repo. Its chat models are appended to the
+-- <leader>ao picker and launched as `claude --model <id>` against Grunden.
+local GRUNDEN_ENV_FILE = vim.fn.expand("~/.grunden.env")
+
+local function read_env_file(path)
+    local env = {}
+    if vim.fn.filereadable(path) == 0 then return nil end
+    for _, line in ipairs(vim.fn.readfile(path)) do
+        local k, v = line:match("^%s*export%s+([%w_]+)%s*=%s*(.-)%s*$")
+        if not k then k, v = line:match("^%s*([%w_]+)%s*=%s*(.-)%s*$") end
+        if k then env[k] = v:gsub([[^(["'])(.*)%1$]], "%2") end
+    end
+    return env
+end
+
+-- Startup system prompt + subagent for Grunden sessions. The `grunden`
+-- helper CLI (scripts/grunden) is put on PATH so the model can offload
+-- one-shot jobs to cheap low-effort chat, embeddings, rerank, PII, STT, TTS.
+local GRUNDEN_SCRIPTS_DIR = vim.fn.stdpath("config") .. "/scripts"
+local GRUNDEN_PROMPT_FILE = vim.fn.stdpath("config") .. "/prompts/grunden-system.md"
+local GRUNDEN_AGENTS = vim.json.encode({
+    ["grunden-worker"] = {
+        description = "Offloads batches of simple text jobs (summarise, classify, extract, translate, "
+            .. "rank, embed, PII-mask, transcribe) to cheaper Grunden models via the `grunden` CLI, "
+            .. "runs them in parallel, checks the answers and returns a compact aggregated result. "
+            .. "Use for many independent items or anything that doesn't need full reasoning.",
+        tools = { "Bash", "Read", "Glob", "Grep" },
+        prompt = table.concat({
+            "You are a dispatcher. Do the work by calling the `grunden` CLI (run `grunden help`), not by reasoning through each item yourself.",
+            "- Text jobs: `grunden ask` (effort low by default; pipe content via stdin). Use `-e high` only for items whose low-effort answer looks wrong.",
+            "- Ranking: `grunden rerank`; similarity: `grunden embed`; PII: `grunden pii`; audio: `grunden transcribe` / `grunden tts`.",
+            "- Fan out with `xargs -P 8` or background jobs for many items; write intermediate results to a temp dir, not to the repo.",
+            "- Spot-check the answers, retry failures once, then return ONLY a compact result (table/list/JSON) plus a one-line note of which models were used and how many calls were made.",
+        }, "\n"),
+    },
+})
+
+-- Sessions launched from <leader>ao that aren't plain claude_N slots.
+local function is_ext_name(name)
+    return name:match("^ollama%-") ~= nil or name:match("^grunden%-") ~= nil
+end
+
 -- Module-level state for dynamic session management
 local _tool_base = nil
 local _active_session = nil -- name of the currently visible session
@@ -80,7 +124,7 @@ end
 -- "claude" entry that spawns a real tmux session on accidental selection.
 local function is_cli_name(name)
     return name:match(CLI_PATTERN) ~= nil
-        or name:match("^ollama%-") ~= nil
+        or is_ext_name(name)
 end
 
 -- Re-register sidekick CLI tools for tmux sessions that survived a nvim
@@ -106,12 +150,12 @@ local function reconnect_sessions()
         if tool_name and hash and is_cli_name(tool_name) and not Config.cli.tools[tool_name] then
             local expected_len = 16 - #tool_name
             if expected_len > 0 and #hash == expected_len and full_hash:sub(1, expected_len) == hash then
-                if tool_name:match("^ollama%-") then
+                if is_ext_name(tool_name) then
                     -- Original model isn't recoverable from the munged name,
                     -- but cmd is unused for `tmux new -A` when the session
                     -- already exists. cmd[1] just needs to be executable for
                     -- the picker's "installed" check.
-                    Config.cli.tools[tool_name] = { cmd = { "ollama" } }
+                    Config.cli.tools[tool_name] = { cmd = { tool_name:match("^ollama%-") and "ollama" or CLI_TOOL } }
                 else
                     Config.cli.tools[tool_name] = make_tool()
                 end
@@ -474,7 +518,7 @@ local function slot_list()
         local n = tonumber(name:match(CLI_NUM_PATTERN))
         if n then
             nums[#nums + 1] = n
-        elseif name:match("^ollama%-") then
+        elseif is_ext_name(name) then
             ollama[#ollama + 1] = name
         end
     end
@@ -502,6 +546,8 @@ function _G.__sidekick_agent_tabs()
             local hl = (name == _active_session) and "%#TabLineSel#" or "%#TabLine#"
             local label = tostring(i)
             local model = name:match("^ollama%-(.+)$")
+            local g = name:match("^grunden%-(.+)$")
+            if g then model = "G·" .. g end
             if model then
                 if #model > 16 then model = model:sub(1, 15) .. "…" end
                 label = i .. ":" .. model
@@ -727,6 +773,8 @@ local keys = {
                     if not Config.cli.tools[choice.active_in] then
                         if choice.active_in:match("^ollama%-") then
                             Config.cli.tools[choice.active_in] = { cmd = { "ollama" } }
+                        elseif choice.active_in:match("^grunden%-") then
+                            Config.cli.tools[choice.active_in] = { cmd = { CLI_TOOL } }
                         else
                             Config.cli.tools[choice.active_in] = make_tool()
                         end
@@ -1043,18 +1091,76 @@ local keys = {
                     vim.notify("Ollama host unreachable: " .. host, vim.log.levels.WARN)
                 end
             end
+            local genv = read_env_file(GRUNDEN_ENV_FILE)
+            if genv and genv.GRUNDEN_API_KEY and genv.GRUNDEN_API_KEY ~= "" then
+                local base = (genv.GRUNDEN_API_URL or "https://api.grunden.ai"):gsub("/+$", "")
+                local out = vim.fn.system({
+                    "curl", "-sf", "--connect-timeout", "2", "--max-time", "5",
+                    "-H", "Authorization: Bearer " .. genv.GRUNDEN_API_KEY,
+                    base .. "/v1/models",
+                })
+                local ok, data = false, nil
+                if vim.v.shell_error == 0 then
+                    ok, data = pcall(vim.json.decode, out)
+                end
+                if ok and type(data) == "table" and type(data.data) == "table" then
+                    for _, m in ipairs(data.data) do
+                        if m.type == "chat" then
+                            table.insert(items, { model = m.id, grunden = { url = base, key = genv.GRUNDEN_API_KEY } })
+                        end
+                    end
+                else
+                    vim.notify("Grunden API unreachable: " .. base, vim.log.levels.WARN)
+                end
+            end
             if #items == 0 then
                 vim.notify("No Ollama models found. Try `ollama pull <model>`.", vim.log.levels.WARN)
                 return
             end
             vim.ui.select(items, {
-                prompt = "ollama launch claude --model:",
+                prompt = "launch claude --model:",
                 format_item = function(item)
+                    if item.grunden then return item.model .. "  (grunden)" end
                     if not item.host then return item.model end
                     return item.model .. "  (" .. item.host:gsub("^https?://", ""):gsub(":%d+$", "") .. ")"
                 end,
             }, function(choice)
                 if not choice then return end
+                if choice.grunden then
+                    -- tmux rewrites "." and ":" in session names, so keep it [%w-].
+                    local name = "grunden-" .. choice.model:gsub("[^%w%-]", "-")
+                    local Config = require("sidekick.config")
+                    Config.cli.tools = Config.cli.tools or {}
+                    Config.cli.tools[name] = {
+                        -- `env -u` instead of env = { KEY = false }: sidekick maps
+                        -- false to `tmux new-session -u`, which tmux doesn't support.
+                        cmd = {
+                            "env", "-u", "ANTHROPIC_API_KEY", CLI_TOOL, "--model", choice.model,
+                            "--append-system-prompt-file", GRUNDEN_PROMPT_FILE,
+                            "--agents", GRUNDEN_AGENTS,
+                            -- Auto mode's safety classifier needs an Anthropic model,
+                            -- so on Grunden it denies every Bash call. Use default
+                            -- mode and pre-allow only the grunden helper.
+                            "--permission-mode", "default",
+                            "--allowedTools", "Bash(grunden:*)",
+                        },
+                        env = {
+                            ANTHROPIC_BASE_URL = choice.grunden.url,
+                            ANTHROPIC_AUTH_TOKEN = choice.grunden.key,
+                            ANTHROPIC_MODEL = choice.model,
+                            ANTHROPIC_DEFAULT_OPUS_MODEL = choice.model,
+                            ANTHROPIC_DEFAULT_SONNET_MODEL = choice.model,
+                            ANTHROPIC_DEFAULT_HAIKU_MODEL = choice.model,
+                            ANTHROPIC_SMALL_FAST_MODEL = choice.model,
+                            CLAUDE_CODE_SUBAGENT_MODEL = choice.model,
+                            CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1",
+                            PATH = GRUNDEN_SCRIPTS_DIR .. ":" .. (vim.env.PATH or ""),
+                        },
+                        is_proc = false,
+                    }
+                    toggle_session(name)
+                    return
+                end
                 local name = "ollama-" .. choice.model:gsub("[:/]", "-")
                 if choice.host then
                     name = name .. "-" .. choice.host:gsub("^https?://", ""):gsub(":%d+$", ""):gsub("%W", "-")
@@ -1068,7 +1174,7 @@ local keys = {
                 toggle_session(name)
             end)
         end,
-        desc = "Sidekick: ollama launch claude (model picker)",
+        desc = "Sidekick: launch claude via ollama/grunden (model picker)",
     },
     {
         "<Tab>",
