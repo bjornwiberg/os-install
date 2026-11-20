@@ -34,6 +34,7 @@ end
 -- one-shot jobs to cheap low-effort chat, embeddings, rerank, PII, STT, TTS.
 local GRUNDEN_SCRIPTS_DIR = vim.fn.stdpath("config") .. "/scripts"
 local GRUNDEN_PROMPT_FILE = vim.fn.stdpath("config") .. "/prompts/grunden-system.md"
+local GRUNDEN_CHEAP_MODEL = "glm-5.3-flash"
 local GRUNDEN_AGENTS = vim.json.encode({
     ["grunden-worker"] = {
         description = "Offloads batches of simple text jobs (summarise, classify, extract, translate, "
@@ -43,7 +44,7 @@ local GRUNDEN_AGENTS = vim.json.encode({
         tools = { "Bash", "Read", "Glob", "Grep" },
         prompt = table.concat({
             "You are a dispatcher. Do the work by calling the `grunden` CLI (run `grunden help`), not by reasoning through each item yourself.",
-            "- Text jobs: `grunden ask` (effort low by default; pipe content via stdin). Use `-e high` only for items whose low-effort answer looks wrong.",
+            "- Text jobs: `grunden ask -M <model>` (pipe content via stdin). Pick the cheapest model that fits: gemma (tiny/short items, 31k ctx), flash (default, long input), glm (needs real thought). Escalate effort or model only for answers that look wrong.",
             "- Ranking: `grunden rerank`; similarity: `grunden embed`; PII: `grunden pii`; audio: `grunden transcribe` / `grunden tts`.",
             "- Fan out with `xargs -P 8` or background jobs for many items; write intermediate results to a temp dir, not to the repo.",
             "- Spot-check the answers, retry failures once, then return ONLY a compact result (table/list/JSON) plus a one-line note of which models were used and how many calls were made.",
@@ -1110,23 +1111,22 @@ local keys = {
             local genv = read_env_file(GRUNDEN_ENV_FILE)
             if genv and genv.GRUNDEN_API_KEY and genv.GRUNDEN_API_KEY ~= "" then
                 local base = (genv.GRUNDEN_API_URL or "https://api.grunden.ai"):gsub("/+$", "")
-                local out = vim.fn.system({
-                    "curl", "-sf", "--connect-timeout", "2", "--max-time", "5",
-                    "-H", "Authorization: Bearer " .. genv.GRUNDEN_API_KEY,
-                    base .. "/v1/models",
-                })
-                local ok, data = false, nil
+                -- The model catalog lives in scripts/grunden (single source of
+                -- truth; /v1/models doesn't list every model our key can use).
+                -- --agentic = models that work as a Claude Code main model.
+                local lines = vim.fn.systemlist({ GRUNDEN_SCRIPTS_DIR .. "/grunden", "models", "--agentic" })
                 if vim.v.shell_error == 0 then
-                    ok, data = pcall(vim.json.decode, out)
-                end
-                if ok and type(data) == "table" and type(data.data) == "table" then
-                    for _, m in ipairs(data.data) do
-                        if m.type == "chat" then
-                            table.insert(items, { model = m.id, grunden = { url = base, key = genv.GRUNDEN_API_KEY } })
+                    for _, line in ipairs(lines) do
+                        local id, alias, price = line:match("^([^\t]+)\t([^\t]*)\t([^\t]*)")
+                        if id then
+                            table.insert(items, {
+                                model = id, alias = alias, price = price,
+                                grunden = { url = base, key = genv.GRUNDEN_API_KEY },
+                            })
                         end
                     end
                 else
-                    vim.notify("Grunden API unreachable: " .. base, vim.log.levels.WARN)
+                    vim.notify("grunden models failed", vim.log.levels.WARN)
                 end
             end
             if #items == 0 then
@@ -1136,7 +1136,7 @@ local keys = {
             vim.ui.select(items, {
                 prompt = "launch claude --model:",
                 format_item = function(item)
-                    if item.grunden then return item.model .. "  (grunden)" end
+                    if item.grunden then return item.model .. "  (grunden " .. item.price .. " €/1M)" end
                     if not item.host then return item.model end
                     return item.model .. "  (" .. item.host:gsub("^https?://", ""):gsub(":%d+$", "") .. ")"
                 end,
@@ -1163,9 +1163,11 @@ local keys = {
                             ANTHROPIC_MODEL = choice.model,
                             ANTHROPIC_DEFAULT_OPUS_MODEL = choice.model,
                             ANTHROPIC_DEFAULT_SONNET_MODEL = choice.model,
-                            ANTHROPIC_DEFAULT_HAIKU_MODEL = choice.model,
-                            ANTHROPIC_SMALL_FAST_MODEL = choice.model,
-                            CLAUDE_CODE_SUBAGENT_MODEL = choice.model,
+                            -- Subagents, haiku-tier and background calls go to the
+                            -- cheap GLM flash (verified to handle Claude Code tools).
+                            ANTHROPIC_DEFAULT_HAIKU_MODEL = GRUNDEN_CHEAP_MODEL,
+                            ANTHROPIC_SMALL_FAST_MODEL = GRUNDEN_CHEAP_MODEL,
+                            CLAUDE_CODE_SUBAGENT_MODEL = GRUNDEN_CHEAP_MODEL,
                             CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1",
                             PATH = GRUNDEN_SCRIPTS_DIR .. ":" .. (vim.env.PATH or ""),
                         },

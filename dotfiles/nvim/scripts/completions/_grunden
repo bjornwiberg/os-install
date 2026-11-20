@@ -12,8 +12,8 @@ _grunden_voices() {
 
 _grunden() {
     local -a commands=(
-        'models:List models with type, endpoint, price and reasoning levels'
-        'ask:One-shot chat completion (default effort low, fast and cheap); stdin is appended'
+        'models:Chat model catalog (price, context, best use) + other models'
+        'ask:One-shot chat (-M gemma|flash|deepseek|glm, default flash, lowest effort); stdin appended'
         'embed:Embeddings with bge-m3 (1024-dim); stdin = one text per line'
         'rerank:Rank docs against a query (args or stdin lines) with bge-reranker'
         'pii:Detect and mask Swedish PII (names, phone numbers, personnummer)'
@@ -34,7 +34,8 @@ _grunden() {
     case $cmd in
     ask)
         _arguments -s \
-            '(-e --effort)'{-e,--effort}'[reasoning effort]:effort:((low\:"fast and cheap (default)" high\:"deeper" max\:"deepest, slowest"))' \
+            '(-M --model)'{-M,--model}'[chat model]:model:((gemma\:"cheapest+fastest, 31k ctx, short one-shot jobs" flash\:"cheap all-rounder, 1M ctx (default)" deepseek\:"Grunden default, image input" glm\:"big GLM, hardest tasks, most expensive"))' \
+            '(-e --effort)'{-e,--effort}'[reasoning effort]:effort:((none\:"gemma only: thinking off (gemma default)" low\:"fast and cheap (default)" high\:"deeper" max\:"deepest, slowest"))' \
             '(-s --system)'{-s,--system}'[system prompt]:system prompt: ' \
             '(-m --max-tokens)'{-m,--max-tokens}'[max output tokens (default 4096)]:tokens:(512 1024 2048 4096 8192)' \
             '(-j --json)'{-j,--json}'[print raw JSON incl. token usage]' \
@@ -66,6 +67,9 @@ _grunden() {
         ;;
     embed|pii)
         _arguments '*:text (or - / pipe via stdin): '
+        ;;
+    models)
+        _arguments '(--agentic)--chat[chat model ids, tab-separated]' '(--chat)--agentic[ids usable in Claude Code]'
         ;;
     *)
         _message 'no arguments'

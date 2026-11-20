@@ -11,7 +11,27 @@ if [[ -z "${GRUNDEN_API_KEY:-}" && -r "$ENV_FILE" ]]; then
 fi
 : "${GRUNDEN_API_KEY:?GRUNDEN_API_KEY missing (set it in $ENV_FILE)}"
 BASE="${GRUNDEN_API_URL:-https://api.grunden.ai}"; BASE="${BASE%/}"
-CHAT_MODEL="${GRUNDEN_CHAT_MODEL:-deepseek-v4.1-flash-1017}"
+# Default model for `grunden ask` (id or alias from the catalog below).
+CHAT_MODEL="${GRUNDEN_CHAT_MODEL:-flash}"
+
+# Chat model catalog. /v1/models only lists deepseek, but these all work with
+# our key (verified 2026-11-20). Prices are € per 1M tokens excl. VAT; the
+# unlisted ones were measured from usage deltas (marked ~). Context: gemma
+# rejects >31129 tokens; GLM accepted 600k. "agentic" = works as a Claude
+# Code model (tool calling via /v1/messages and fits Claude Code's ~40k-token
+# system prompt) — this is what <leader>ao offers.
+# id|alias|in|out|context|reasoning levels|default effort|agentic|best for
+CATALOG='gemma-4-26b|gemma|~0.12|~0.36|31k|none/high|none|no|Cheapest+fastest. Short one-shot text jobs: classify, extract, translate, short summaries. Too small for Claude Code.
+glm-5.3-flash|flash|~0.16|~0.48|1M|low/high/max|low|yes|Cheap all-rounder, long context. Default for delegated jobs and Claude Code subagents.
+deepseek-v4.1-flash-1017|deepseek|0.50|1.50|1M|low/high/max|low|yes|Grunden default (listed) chat model. Image input on /v1/chat/completions.
+glm-5.3|glm|~0.72|~1.44|1M|low/high/max|low|yes|Big GLM, most used across the organisation. Hard coding/agentic work, tricky reasoning. Most expensive.'
+
+# resolve_model ALIAS_OR_ID -> catalog line (or a synthetic one for unknown ids)
+resolve_model() {
+    local line
+    line=$(printf '%s\n' "$CATALOG" | awk -F'|' -v m="$1" '$1 == m || $2 == m' | head -1)
+    [[ -n "$line" ]] && printf '%s' "$line" || printf '%s|%s|?|?|?|?|low|?|' "$1" "$1"
+}
 # Optional cost dimension (`user` field); unset = "Not dimensioned".
 TAG="${GRUNDEN_USER_TAG:-}"
 
@@ -39,9 +59,11 @@ usage() {
     cat <<'EOF'
 grunden <command> [options]
 
-  models                         List models (id, type, endpoint, price/1M in→out)
+  models [--chat|--agentic]      Chat model catalog (price, context, best use) + other models.
+                                 --chat / --agentic: just the ids (agentic = usable in Claude Code)
   ask [opts] [PROMPT|-]          One-shot chat completion, prints the answer.
-      -e, --effort low|high|max  Reasoning effort (default: low — fast & cheap)
+      -M, --model MODEL          gemma | flash (default) | deepseek | glm, or a full id
+      -e, --effort LEVEL         Reasoning effort (default: lowest — none for gemma, low otherwise)
       -s, --system TEXT          System prompt
       -m, --max-tokens N         Max output tokens (default 4096)
       -j, --json                 Print raw JSON response (incl. usage)
@@ -69,14 +91,25 @@ EOF
 cmd=${1:-help}; shift || true
 case "$cmd" in
 models)
-    api GET /v1/models | jq -r '.data[] | [.id, .type, .endpoint,
-        (if .pricing then "\(.pricing.input_per_1m_tokens.amount)→\(.pricing.output_per_1m_tokens.amount) \(.pricing.input_per_1m_tokens.currency)" else "-" end),
-        ((.reasoning_levels // []) | join("/"))] | @tsv' | column -t -s $'\t'
+    # Machine-readable: id<TAB>alias<TAB>in→out<TAB>best for (used by <leader>ao).
+    case "${1:-}" in
+    --chat) printf '%s\n' "$CATALOG" | awk -F'|' '{print $1"\t"$2"\t"$3"→"$4"\t"$9}'; exit 0 ;;
+    --agentic) printf '%s\n' "$CATALOG" | awk -F'|' '$8 == "yes" {print $1"\t"$2"\t"$3"→"$4"\t"$9}'; exit 0 ;;
+    esac
+    echo "CHAT MODELS (cheapest first; € per 1M tokens excl. VAT, ~ = measured, not listed by the API)"
+    { echo "ALIAS|ID|IN→OUT|CONTEXT|EFFORT|CLAUDE CODE|BEST FOR"
+      printf '%s\n' "$CATALOG" | awk -F'|' '{printf "%s|%s|%s→%s|%s|%s|%s|%s\n", $2, $1, $3, $4, $5, $6, $8, $9}'
+    } | column -t -s '|'
+    echo
+    echo "OTHER MODELS (from /v1/models)"
+    api GET /v1/models | jq -r '.data[] | select(.type != "chat") | [.id, .type, .endpoint] | @tsv' \
+        | column -t -s $'\t'
     ;;
 ask)
-    effort=low system="" max_tokens=4096 raw=0 args=()
+    effort="" system="" max_tokens=4096 raw=0 args=() model=$CHAT_MODEL
     while [[ $# -gt 0 ]]; do
         case "$1" in
+        -M|--model) model=$2; shift 2 ;;
         -e|--effort) effort=$2; shift 2 ;;
         -s|--system) system=$2; shift 2 ;;
         -m|--max-tokens) max_tokens=$2; shift 2 ;;
@@ -93,12 +126,27 @@ ask)
 }$stdin"
     fi
     [[ -n "$prompt" ]] || die "ask: empty prompt"
-    resp=$(jq -n --arg m "$CHAT_MODEL" --arg e "$effort" --arg s "$system" \
-        --arg p "$prompt" --argjson n "$max_tokens" --arg u "$TAG" '{
-            model: $m, reasoning_effort: $e, max_tokens: $n,
-            messages: ((if $s != "" then [{role:"system",content:$s}] else [] end)
-                       + [{role:"user",content:$p}])
-        } + (if $u != "" then {user: $u} else {} end)' | json_post /v1/chat/completions)
+    explicit_effort=$effort
+    send() { # send MODEL_ID EFFORT
+        jq -n --arg m "$1" --arg e "$2" --arg s "$system" \
+            --arg p "$prompt" --argjson n "$max_tokens" --arg u "$TAG" '{
+                model: $m, reasoning_effort: $e, max_tokens: $n,
+                messages: ((if $s != "" then [{role:"system",content:$s}] else [] end)
+                           + [{role:"user",content:$p}])
+            } + (if $u != "" then {user: $u} else {} end)' | json_post /v1/chat/completions
+    }
+    IFS='|' read -r id _ _ _ _ _ def_effort _ _ <<<"$(resolve_model "$model")"
+    errf=$(mktemp); trap 'rm -f "$errf"' EXIT
+    if ! resp=$(send "$id" "${explicit_effort:-$def_effort}" 2>"$errf"); then
+        # Gemma's 31k context is easy to overflow with piped files: retry on flash.
+        if grep -q "prompt is too long" "$errf" && [[ "$id" != glm-5.3-flash ]]; then
+            echo "grunden: prompt too long for $id, retrying on glm-5.3-flash" >&2
+            IFS='|' read -r id _ _ _ _ _ def_effort _ _ <<<"$(resolve_model flash)"
+            resp=$(send "$id" "${explicit_effort:-$def_effort}")
+        else
+            cat "$errf" >&2; exit 1
+        fi
+    fi
     if [[ $raw -eq 1 ]]; then printf '%s\n' "$resp"
     else printf '%s\n' "$resp" | jq -r '.choices[0].message.content // empty'
     fi
